@@ -3,9 +3,11 @@ from app.api.agent import router as agent_router
 from app.api.tasks import router as tasks_router
 from app.api.study import router as study_router
 from app.api.integrations import router as integrations_router
+from app.api.onboarding import router as onboarding_router
 
 app = FastAPI(title="Study Planner Agent")
 
+app.include_router(onboarding_router)
 app.include_router(agent_router)
 app.include_router(tasks_router)
 app.include_router(study_router)

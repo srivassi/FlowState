@@ -1,14 +1,9 @@
 from fastapi import APIRouter, HTTPException
-from app.agent.orchestrator import StudyPlannerAgent
-from app.agent.progress_tracker import ProgressTracker
 from pydantic import BaseModel
 from typing import List
 from datetime import date
 
 router = APIRouter(prefix="/study")
-
-agent = StudyPlannerAgent()
-progress_tracker = ProgressTracker()
 
 class ProgressUpdate(BaseModel):
     completed_tasks: List[str]

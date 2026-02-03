@@ -8,6 +8,12 @@ class StudyPreferences(BaseModel):
     preferred_session_length: int  # minutes
     break_frequency: int  # minutes between breaks
     difficulty_preference: str  # gradual, mixed, challenging
+    
+    # Pomodoro Settings
+    pomodoro_work_minutes: int = 25  # Default 25, but user can set 50
+    pomodoro_break_minutes: int = 5   # Default 5, but user can set 10
+    long_break_minutes: int = 15      # After 4 sessions
+    long_break_interval: int = 4      # Every N sessions
 
 class AssessmentInfo(BaseModel):
     exam_date: Optional[datetime] = None

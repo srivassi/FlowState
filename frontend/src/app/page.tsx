@@ -1,10 +1,16 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 export default function Home() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const router = useRouter();
+
+  const handleLogin = () => {
+    router.push('/dashboard');
+  };
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#191919]">
@@ -46,7 +52,7 @@ export default function Home() {
             />
           </div>
 
-          <button className="w-full rounded-lg bg-white py-3 font-semibold text-black transition hover:bg-zinc-200">
+          <button onClick={handleLogin} className="w-full rounded-lg bg-white py-3 font-semibold text-black transition hover:bg-zinc-200">
             Continue
           </button>
 

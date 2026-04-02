@@ -1,13 +1,8 @@
 fastapi
-uvicorn
+uvicorn[standard]
 pydantic
-sqlalchemy
-alembic
 python-dotenv
-google-generativeai
+anthropic
 supabase
-google-api-python-client
-google-auth-httplib2
-google-auth-oauthlib
-spotipy
 requests
+python-multipart

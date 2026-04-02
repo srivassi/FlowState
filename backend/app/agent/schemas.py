@@ -26,6 +26,7 @@ class AgentInput(BaseModel):
     preferences: StudyPreferences
     assessment_info: AssessmentInfo
     course_id: Optional[str] = None
+    user_id: Optional[str] = None
 
 class StudyResource(BaseModel):
     title: str

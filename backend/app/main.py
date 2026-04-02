@@ -9,15 +9,13 @@ import os
 
 app = FastAPI(title="Study Planner Agent")
 
-# In production NEXT_PUBLIC_API_URL sets the frontend origin
-allowed_origins = [
-    "http://localhost:3000",
-    os.getenv("FRONTEND_URL", ""),
-]
+frontend_url = os.getenv("FRONTEND_URL", "")
+allowed_origins = [o for o in ["http://localhost:3000", frontend_url] if o]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o for o in allowed_origins if o],
+    allow_origins=allowed_origins if allowed_origins else ["*"],
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -79,6 +79,7 @@ function WhiteboardInner() {
   const [selection, setSelection] = useState<string>('')
 
   const [numPages, setNumPages] = useState<number>(0)
+  const [pdfError, setPdfError] = useState<string | null>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; text: string; page: number } | null>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -107,6 +108,8 @@ function WhiteboardInner() {
 
   const switchCourse = async (courseId: string) => {
     setSelectedCourse(courseId)
+    setNumPages(0)
+    setPdfError(null)
     if (userId) loadWhiteboard(userId, courseId)
   }
 
@@ -335,9 +338,20 @@ function WhiteboardInner() {
           >
             {pdfUrl ? (
               <div className="absolute inset-0 overflow-auto flex flex-col items-center bg-gray-100 py-4 gap-2">
+                {pdfError ? (
+                  <div className="flex flex-col items-center justify-center h-full gap-4">
+                    <div className="text-sm" style={{ color: '#991B1B' }}>{pdfError}</div>
+                    <button onClick={() => { setPdfError(null); setPdfUrl(null); setPdfName(null) }}
+                      className="rounded px-3 py-1.5 text-xs"
+                      style={{ border: '1px solid #EDEDED', color: '#37352F' }}>
+                      Remove PDF
+                    </button>
+                  </div>
+                ) : (
                 <PDFDocument
                   file={pdfUrl}
-                  onLoadSuccess={({ numPages: n }: { numPages: number }) => setNumPages(n)}
+                  onLoadSuccess={({ numPages: n }: { numPages: number }) => { setNumPages(n); setPdfError(null) }}
+                  onLoadError={(err: Error) => setPdfError(`Failed to load PDF: ${err.message}`)}
                   options={{
                     cMapUrl: `https://unpkg.com/pdfjs-dist@4.4.168/cmaps/`,
                     cMapPacked: true,
@@ -367,6 +381,7 @@ function WhiteboardInner() {
                     </div>
                   ))}
                 </PDFDocument>
+                )}
               </div>
             ) : (
               <div className="flex h-full flex-col items-center justify-center">

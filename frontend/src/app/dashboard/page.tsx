@@ -45,12 +45,12 @@ type Stats = {
 }
 
 const COVER_IMAGES = [
-  'https://images.unsplash.com/photo-1509228468518-180dd4864904?w=1200&h=280&fit=crop',
-  'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1200&h=280&fit=crop',
-  'https://images.unsplash.com/photo-1519681393784-d120267933ba?w=1200&h=280&fit=crop',
-  'https://images.unsplash.com/photo-1511884642898-4c92249e20b6?w=1200&h=280&fit=crop',
-  'https://images.unsplash.com/photo-1501854140801-50d01698950b?w=1200&h=280&fit=crop',
-  'https://images.unsplash.com/photo-1476611338391-6f395a0dd82e?w=1200&h=280&fit=crop',
+  'https://plus.unsplash.com/premium_photo-1661962542692-4fe7a4ad6b54?w=1200&h=280&fit=crop',
+  'https://plus.unsplash.com/premium_photo-1697729844084-c03db2377161?w=1200&h=280&fit=crop',
+  'https://plus.unsplash.com/premium_photo-1661963691068-e8fffe491afa?w=1200&h=280&fit=crop',
+  'https://images.unsplash.com/photo-1595433306946-233f47e4af3a?w=1200&h=280&fit=crop',
+  'https://plus.unsplash.com/premium_photo-1697730373510-51b7fcf2ff52?w=1200&h=280&fit=crop',
+  'https://images.unsplash.com/photo-1601821139990-9fc929db79ce?w=1200&h=280&fit=crop',
 ]
 
 function NotionBtn({ onClick, children, className = '' }: { onClick?: () => void; children: React.ReactNode; className?: string }) {

@@ -122,9 +122,16 @@ function WhiteboardInner() {
     const { error } = await supabase.storage.from('whiteboards').upload(path, file, { upsert: true })
     if (error) { alert('Upload failed: ' + error.message); return }
     const { data } = supabase.storage.from('whiteboards').getPublicUrl(path)
-    setPdfUrl(data.publicUrl)
-    setPdfName(file.name)
-    scheduleSave(notes)
+    const newUrl = data.publicUrl
+    const newName = file.name
+    setPdfUrl(newUrl)
+    setPdfName(newName)
+    // Save directly with the new values — don't rely on state closure
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    setSaving(true)
+    try {
+      await api.saveWhiteboard({ course_id: selectedCourse, user_id: userId, sticky_notes: notes, pdf_name: newName, pdf_url: newUrl })
+    } finally { setSaving(false) }
   }
 
   // ── Canvas interaction ────────────────────────────────────
@@ -288,13 +295,13 @@ function WhiteboardInner() {
         <div className="relative flex flex-1 overflow-hidden">
           <div
             ref={canvasRef}
-            onDoubleClick={handleCanvasDoubleClick}
+            onDoubleClick={pdfUrl ? undefined : handleCanvasDoubleClick}
             onMouseUp={handleMouseUp}
-            className="relative flex-1 overflow-auto"
+            className="relative flex-1 overflow-hidden"
             style={{ userSelect: 'text', backgroundColor: '#FFFFFF' }}
           >
             {pdfUrl ? (
-              <iframe src={pdfUrl} className="h-full w-full border-0" title={pdfName || 'PDF'} />
+              <iframe src={pdfUrl} className="absolute inset-0 h-full w-full border-0" title={pdfName || 'PDF'} />
             ) : (
               <div className="flex h-full flex-col items-center justify-center">
                 <div className="mb-4 text-6xl">📄</div>
@@ -311,10 +318,11 @@ function WhiteboardInner() {
               </div>
             )}
 
-            {/* Sticky notes layer */}
+            {/* Notes overlay — pointer-events-none so PDF stays interactive; notes themselves get pointer-events-auto */}
+            <div className="absolute inset-0 pointer-events-none">
             {notes.map(note => (
               <div key={note.id}
-                className="absolute select-none"
+                className="absolute select-none pointer-events-auto"
                 style={{ left: note.x, top: note.y, width: note.width, zIndex: activeNote === note.id ? 100 : 10 }}
                 onClick={() => setActiveNote(note.id)}
               >
@@ -401,7 +409,21 @@ function WhiteboardInner() {
                 )}
               </div>
             ))}
-          </div>
+            {/* Add note button when PDF is loaded (can't double-click iframe) */}
+            {pdfUrl && (
+              <button
+                onClick={() => {
+                  const note = newNote(40, 40)
+                  const updated = [...notes, note]
+                  updateNotes(updated)
+                  setActiveNote(note.id)
+                }}
+                className="pointer-events-auto absolute bottom-4 right-4 rounded-full px-4 py-2 text-sm font-medium text-white shadow-lg transition hover:opacity-90"
+                style={{ backgroundColor: '#37352F' }}>
+                + Add note
+              </button>
+            )}
+            </div>
         </div>
       )}
     </div>

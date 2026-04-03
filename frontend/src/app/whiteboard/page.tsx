@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic'
 
-import { useState, useEffect, useRef, useCallback, Suspense } from 'react'
+import { useState, useEffect, useRef, useCallback, Suspense, useMemo } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '../../lib/supabase'
@@ -57,6 +57,46 @@ export default function WhiteboardPage() {
     <Suspense>
       <WhiteboardInner />
     </Suspense>
+  )
+}
+
+const PDF_OPTIONS = {
+  cMapUrl: `https://unpkg.com/pdfjs-dist@4.4.168/cmaps/`,
+  cMapPacked: true,
+  standardFontDataUrl: `https://unpkg.com/pdfjs-dist@4.4.168/standard_fonts/`,
+}
+
+function PDFViewer({ pdfUrl, numPages, canvasRef, onLoadSuccess, onLoadError, onMouseUp, onContextMenu, onDoubleClick }: {
+  pdfUrl: string
+  numPages: number
+  canvasRef: React.RefObject<HTMLDivElement>
+  onLoadSuccess: (n: number) => void
+  onLoadError: (err: Error) => void
+  onMouseUp: () => void
+  onContextMenu: (e: React.MouseEvent, page: number) => void
+  onDoubleClick: (e: React.MouseEvent, page: number) => void
+}) {
+  return (
+    <PDFDocument
+      file={pdfUrl}
+      onLoadSuccess={({ numPages: n }: { numPages: number }) => onLoadSuccess(n)}
+      onLoadError={onLoadError}
+      options={PDF_OPTIONS}
+    >
+      {Array.from({ length: numPages }, (_, i) => (
+        <div key={i} className="mb-2 shadow-md"
+          onMouseUp={onMouseUp}
+          onContextMenu={(e: React.MouseEvent) => onContextMenu(e, i + 1)}
+          onDoubleClick={(e: React.MouseEvent) => onDoubleClick(e, i + 1)}>
+          <PDFPage
+            pageNumber={i + 1}
+            width={Math.min(700, (canvasRef.current?.clientWidth || 800) - 48)}
+            renderAnnotationLayer={false}
+            renderTextLayer={false}
+          />
+        </div>
+      ))}
+    </PDFDocument>
   )
 }
 
@@ -348,39 +388,25 @@ function WhiteboardInner() {
                     </button>
                   </div>
                 ) : (
-                <PDFDocument
-                  file={pdfUrl}
-                  onLoadSuccess={({ numPages: n }: { numPages: number }) => { setNumPages(n); setPdfError(null) }}
-                  onLoadError={(err: Error) => setPdfError(`Failed to load PDF: ${err.message}`)}
-                  options={{
-                    cMapUrl: `https://unpkg.com/pdfjs-dist@4.4.168/cmaps/`,
-                    cMapPacked: true,
-                    standardFontDataUrl: `https://unpkg.com/pdfjs-dist@4.4.168/standard_fonts/`,
-                  }}
-                >
-                  {Array.from({ length: numPages }, (_, i) => (
-                    <div key={i} className="mb-2 shadow-md"
-                      onMouseUp={handleMouseUp}
-                      onContextMenu={(e: React.MouseEvent) => handleContextMenu(e, i + 1)}>
-                      <PDFPage
-                        pageNumber={i + 1}
-                        width={Math.min(700, (canvasRef.current?.clientWidth || 800) - 48)}
-                        renderAnnotationLayer={false}
-                        renderTextLayer={false}
-                        onDoubleClick={(e: React.MouseEvent) => {
-                          if (!canvasRef.current) return
-                          const rect = canvasRef.current.getBoundingClientRect()
-                          const note = newNote(e.clientX - rect.left, e.clientY - rect.top, selection || undefined)
-                          note.page_number = i + 1
-                          const updated = [...notes, note]
-                          updateNotes(updated)
-                          setActiveNote(note.id)
-                          setSelection('')
-                        }}
-                      />
-                    </div>
-                  ))}
-                </PDFDocument>
+                  <PDFViewer
+                    pdfUrl={pdfUrl}
+                    numPages={numPages}
+                    canvasRef={canvasRef}
+                    onLoadSuccess={(n) => { setNumPages(n); setPdfError(null) }}
+                    onLoadError={(err) => setPdfError(`Failed to load PDF: ${err.message}`)}
+                    onMouseUp={handleMouseUp}
+                    onContextMenu={handleContextMenu}
+                    onDoubleClick={(e, page) => {
+                      if (!canvasRef.current) return
+                      const rect = canvasRef.current.getBoundingClientRect()
+                      const note = newNote(e.clientX - rect.left, e.clientY - rect.top, selection || undefined)
+                      note.page_number = page
+                      const updated = [...notes, note]
+                      updateNotes(updated)
+                      setActiveNote(note.id)
+                      setSelection('')
+                    }}
+                  />
                 )}
               </div>
             ) : (

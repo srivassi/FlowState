@@ -341,6 +341,11 @@ function WhiteboardInner() {
                   file={pdfUrl}
                   onLoadSuccess={({ numPages: n }) => setNumPages(n)}
                   onMouseUp={handleMouseUp}
+                  options={{
+                    cMapUrl: `https://unpkg.com/pdfjs-dist@4.4.168/cmaps/`,
+                    cMapPacked: true,
+                    standardFontDataUrl: `https://unpkg.com/pdfjs-dist@4.4.168/standard_fonts/`,
+                  }}
                 >
                   {Array.from({ length: numPages }, (_, i) => (
                     <div key={i} className="mb-2 shadow-md"
@@ -348,7 +353,7 @@ function WhiteboardInner() {
                       onContextMenu={e => handleContextMenu(e, i + 1)}>
                       <Page
                         pageNumber={i + 1}
-                        width={700}
+                        width={Math.min(700, (canvasRef.current?.clientWidth || 800) - 48)}
                         onDoubleClick={e => {
                           if (!canvasRef.current) return
                           const rect = canvasRef.current.getBoundingClientRect()

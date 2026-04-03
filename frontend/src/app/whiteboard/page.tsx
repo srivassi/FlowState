@@ -121,9 +121,20 @@ function WhiteboardInner() {
   const [numPages, setNumPages] = useState<number>(0)
   const [pdfError, setPdfError] = useState<string | null>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; text: string; page: number } | null>(null)
+  const [pageWidth, setPageWidth] = useState(700)
   const canvasRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // ── Page width (stable, avoids PDF worker restart) ────────
+  useEffect(() => {
+    const update = () => {
+      if (canvasRef.current) setPageWidth(Math.min(700, canvasRef.current.clientWidth - 48))
+    }
+    update()
+    window.addEventListener('resize', update)
+    return () => window.removeEventListener('resize', update)
+  }, [])
 
   // ── Auth ──────────────────────────────────────────────────
   useEffect(() => {
@@ -391,7 +402,7 @@ function WhiteboardInner() {
                   <PDFViewer
                     pdfUrl={pdfUrl}
                     numPages={numPages}
-                    pageWidth={Math.min(700, (canvasRef.current?.clientWidth || 800) - 48)}
+                    pageWidth={pageWidth}
                     onLoadSuccess={(n) => { setNumPages(n); setPdfError(null) }}
                     onLoadError={(err) => setPdfError(`Failed to load PDF: ${err.message}`)}
                     onMouseUp={handleMouseUp}

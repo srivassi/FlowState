@@ -26,7 +26,7 @@ type Flashcard = {
   status?: 'new' | 'review' | 'mastered'
 }
 
-type Set = {
+type FlashcardSet = {
   id: string
   title: string
   course_id: string
@@ -36,7 +36,7 @@ export default function StudyPage() {
   const router = useRouter()
   const { setId } = useParams<{ setId: string }>()
 
-  const [set, setSet] = useState<Set | null>(null)
+  const [set, setSet] = useState<FlashcardSet | null>(null)
   const [cards, setCards] = useState<Flashcard[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
   const [flipped, setFlipped] = useState(false)

@@ -145,14 +145,9 @@ export default function Dashboard() {
 
   const startTimer = async (task: Task) => {
     if (!userId) return
-    setActiveTask(task)
-    setTimeLeft(task.estimated_minutes * 60)
-    setIsRunning(false)
     try {
       const session = await api.startPomodoro({ task_id: task.id, user_id: userId, duration_minutes: task.estimated_minutes })
-      setActiveSessionId(session.id)
-      setTodayTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: 'in_progress' } : t))
-      setIsRunning(true)
+      router.push(`/focus?title=${encodeURIComponent(task.title)}&taskId=${task.id}&sessionId=${session.id}&userId=${userId}&duration=${task.estimated_minutes}`)
     } catch (e) { console.error(e) }
   }
 

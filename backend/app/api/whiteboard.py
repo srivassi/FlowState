@@ -6,6 +6,7 @@ import anthropic
 import os
 import uuid
 import io
+import json
 
 try:
     import pypdf
@@ -23,18 +24,27 @@ class StickyNote(BaseModel):
     width: float = 320
     highlight_text: Optional[str] = None
     page_number: Optional[int] = None
-    color: str = "#FEF08A"          # yellow default
+    color: str = "#FEF08A"
     title: Optional[str] = None
-    messages: List[Dict[str, str]]  # [{role: user|assistant, content: str}]
-    parent_note_id: Optional[str] = None   # for forked notes
+    messages: List[Dict[str, str]]
+    parent_note_id: Optional[str] = None
+    page_id: Optional[str] = None   # which whiteboard page this note belongs to
+
+
+class PageData(BaseModel):
+    id: str
+    name: str
+    pdf_url: Optional[str] = None
+    pdf_name: Optional[str] = None
 
 
 class WhiteboardSave(BaseModel):
     course_id: str
     user_id: str
     sticky_notes: List[StickyNote]
-    pdf_name: Optional[str] = None
-    pdf_url: Optional[str] = None
+    pdf_name: Optional[str] = None   # legacy single-PDF compat
+    pdf_url: Optional[str] = None    # legacy single-PDF compat
+    pages: Optional[List[Dict[str, Any]]] = None  # multi-page metadata
 
 
 class ChatMessage(BaseModel):
@@ -52,10 +62,10 @@ class ForkNote(BaseModel):
     course_id: str
     user_id: str
     parent_note_id: str
-    fork_message: Optional[str] = None   # optional opening message for the fork
+    fork_message: Optional[str] = None
 
 
-# ─── PDF upload (service role bypasses RLS) ──────────────────
+# ─── PDF upload ──────────────────────────────────────────────
 
 @router.post("/upload-pdf")
 def upload_pdf(
@@ -85,9 +95,21 @@ def get_whiteboard(course_id: str, user_id: str):
         .execute()
     )
     if result.data:
-        return result.data[0]
-    # Return empty whiteboard if none exists yet
-    return {"course_id": course_id, "sticky_notes": [], "pdf_url": None, "pdf_name": None}
+        row = dict(result.data[0])
+        # Decode pages from pdf_name if it was stored as JSON
+        pdf_name_raw = row.get("pdf_name") or ""
+        if pdf_name_raw.startswith("["):
+            try:
+                pages = json.loads(pdf_name_raw)
+                if isinstance(pages, list) and pages and isinstance(pages[0], dict) and "id" in pages[0]:
+                    row["pages"] = pages
+                    # Restore pdf_name/pdf_url from first page for compat
+                    row["pdf_name"] = pages[0].get("pdf_name")
+                    row["pdf_url"] = pages[0].get("pdf_url")
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return row
+    return {"course_id": course_id, "sticky_notes": [], "pdf_url": None, "pdf_name": None, "pages": None}
 
 
 # ─── Save/update whiteboard state ────────────────────────────
@@ -96,7 +118,6 @@ def get_whiteboard(course_id: str, user_id: str):
 def save_whiteboard(body: WhiteboardSave):
     supabase = get_supabase_client()
 
-    # Check if whiteboard exists
     existing = (
         supabase.table("whiteboards")
         .select("id")
@@ -108,13 +129,21 @@ def save_whiteboard(body: WhiteboardSave):
 
     notes_json = [n.dict() for n in body.sticky_notes]
 
+    # Encode pages into pdf_name as JSON; keep pdf_url for first page compat
+    if body.pages is not None:
+        stored_pdf_name = json.dumps(body.pages)
+        stored_pdf_url = body.pages[0].get("pdf_url") if body.pages else None
+    else:
+        stored_pdf_name = body.pdf_name
+        stored_pdf_url = body.pdf_url
+
     if existing.data:
         result = (
             supabase.table("whiteboards")
             .update({
                 "sticky_notes": notes_json,
-                "pdf_name": body.pdf_name,
-                "pdf_url": body.pdf_url,
+                "pdf_name": stored_pdf_name,
+                "pdf_url": stored_pdf_url,
                 "updated_at": "now()",
             })
             .eq("id", existing.data[0]["id"])
@@ -127,8 +156,8 @@ def save_whiteboard(body: WhiteboardSave):
                 "course_id": body.course_id,
                 "user_id": body.user_id,
                 "sticky_notes": notes_json,
-                "pdf_name": body.pdf_name,
-                "pdf_url": body.pdf_url,
+                "pdf_name": stored_pdf_name,
+                "pdf_url": stored_pdf_url,
             })
             .execute()
         )
@@ -142,7 +171,6 @@ def save_whiteboard(body: WhiteboardSave):
 
 @router.post("/chat")
 def chat_on_note(body: ChatMessage):
-    """Send a message in a sticky note's conversation thread."""
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not set")
@@ -155,7 +183,6 @@ def chat_on_note(body: ChatMessage):
         "this is an annotation tool, not a full chat interface. Use bullet points for clarity when listing multiple points."
     )
 
-    # Extract PDF text and add as context
     if body.pdf_url and HAS_PYPDF:
         try:
             import requests as _requests
@@ -176,7 +203,7 @@ def chat_on_note(body: ChatMessage):
                     f"{pdf_text[:4000]}"
                 )
         except Exception:
-            pass  # Silently skip if PDF extraction fails
+            pass
 
     if body.highlight_text:
         system_prompt += (
@@ -185,7 +212,6 @@ def chat_on_note(body: ChatMessage):
             f"Ground your response in this excerpt unless they ask something unrelated."
         )
 
-    # Build message history
     messages = [*body.prior_messages, {"role": "user", "content": body.message}]
 
     response = client.messages.create(
@@ -197,14 +223,12 @@ def chat_on_note(body: ChatMessage):
 
     reply = response.content[0].text
 
-    # Append both turns to the note's messages and persist
     updated_messages = [
         *body.prior_messages,
         {"role": "user", "content": body.message},
         {"role": "assistant", "content": reply},
     ]
 
-    # Update this specific note inside the whiteboard JSONB
     supabase = get_supabase_client()
     wb = (
         supabase.table("whiteboards")
@@ -232,7 +256,6 @@ def chat_on_note(body: ChatMessage):
 
 @router.post("/fork")
 def fork_note(body: ForkNote):
-    """Clone a note's context into a new sticky note (branching thread)."""
     supabase = get_supabase_client()
 
     wb = (
@@ -254,12 +277,13 @@ def fork_note(body: ForkNote):
     new_note = {
         **parent,
         "id": str(uuid.uuid4()),
-        "x": parent["x"] + 340,    # offset to the right
+        "x": parent["x"] + 340,
         "y": parent["y"],
         "parent_note_id": body.parent_note_id,
         "title": f"Fork of: {parent.get('title', 'note')}",
-        "messages": list(parent["messages"]),   # copy context
-        "color": "#DBEAFE",         # blue tint to signal fork
+        "messages": list(parent["messages"]),
+        "color": "#DBEAFE",
+        # page_id is preserved via **parent spread
     }
 
     if body.fork_message:

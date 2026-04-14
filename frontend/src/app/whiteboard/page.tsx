@@ -17,7 +17,6 @@ const PDFDocument = _dynamic(() => import('react-pdf').then(async m => {
 
 const PDFPage = _dynamic(() => import('react-pdf').then(m => ({ default: m.Page })), { ssr: false })
 
-
 type Message = { role: 'user' | 'assistant'; content: string }
 
 type StickyNote = {
@@ -32,20 +31,24 @@ type StickyNote = {
   messages: Message[]
   parent_note_id: string | null
   minimised?: boolean
+  page_id?: string
+}
+
+type Page = {
+  id: string
+  name: string
+  pdf_url: string | null
+  pdf_name: string | null
 }
 
 type Course = { id: string; name: string; color: string }
 
 const NOTE_COLORS = ['#FEF08A', '#BBF7D0', '#BFDBFE', '#FDE68A', '#F5D0FE', '#FECACA']
 
-/** Renders a small subset of markdown: bold, inline code, bullet lists. */
 function renderMarkdown(text: string): React.ReactNode {
   return text.split('\n').map((line, li) => {
-    // Bullet point
     const isBullet = /^[\s]*[-*•]\s/.test(line)
     const content = isBullet ? line.replace(/^[\s]*[-*•]\s/, '') : line
-
-    // Split on **bold** and `code`
     const parts: React.ReactNode[] = []
     const regex = /(\*\*(.+?)\*\*|`(.+?)`)/g
     let last = 0
@@ -64,7 +67,6 @@ function renderMarkdown(text: string): React.ReactNode {
       last = match.index + match[0].length
     }
     if (last < content.length) parts.push(content.slice(last))
-
     return (
       <div key={li} style={isBullet ? { paddingLeft: 12, display: 'flex', gap: 4 } : {}}>
         {isBullet && <span style={{ opacity: 0.5, flexShrink: 0 }}>•</span>}
@@ -74,7 +76,7 @@ function renderMarkdown(text: string): React.ReactNode {
   })
 }
 
-function newNote(x: number, y: number, highlight?: string): StickyNote {
+function newNote(x: number, y: number, pageId: string, highlight?: string): StickyNote {
   return {
     id: crypto.randomUUID(),
     x, y,
@@ -85,6 +87,7 @@ function newNote(x: number, y: number, highlight?: string): StickyNote {
     title: highlight ? `"${highlight.slice(0, 40)}${highlight.length > 40 ? '…' : ''}"` : 'Note',
     messages: [],
     parent_note_id: null,
+    page_id: pageId,
   }
 }
 
@@ -144,9 +147,21 @@ function WhiteboardInner() {
   const [userId, setUserId] = useState<string | null>(null)
   const [courses, setCourses] = useState<Course[]>([])
   const [selectedCourse, setSelectedCourse] = useState<string | null>(courseIdParam)
+
+  // Pages
+  const [pages, setPages] = useState<Page[]>([])
+  const [activePageId, setActivePageId] = useState<string | null>(null)
+  const [renamingPageId, setRenamingPageId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+
+  const activePage = useMemo(() => pages.find(p => p.id === activePageId) || null, [pages, activePageId])
+
   const [notes, setNotes] = useState<StickyNote[]>([])
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null)
-  const [pdfName, setPdfName] = useState<string | null>(null)
+  const activeNotes = useMemo(
+    () => notes.filter(n => n.page_id === activePageId),
+    [notes, activePageId]
+  )
+
   const [activeNote, setActiveNote] = useState<string | null>(null)
   const [chatInput, setChatInput] = useState<{ [noteId: string]: string }>({})
   const [loadingChat, setLoadingChat] = useState<{ [noteId: string]: boolean }>({})
@@ -162,8 +177,9 @@ function WhiteboardInner() {
   const canvasRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const renameInputRef = useRef<HTMLInputElement>(null)
 
-  // ── Page width (stable, avoids PDF worker restart) ────────
+  // ── Page width ────────────────────────────────────────────
   useEffect(() => {
     const update = () => {
       if (canvasRef.current) setPageWidth(Math.min(700, canvasRef.current.clientWidth - 48))
@@ -185,43 +201,121 @@ function WhiteboardInner() {
     })
   }, [router])
 
+  // ── Reset numPages/pdfError when active page changes ─────
+  useEffect(() => {
+    setNumPages(0)
+    setPdfError(null)
+  }, [activePageId])
+
+  // ── Focus rename input when editing ──────────────────────
+  useEffect(() => {
+    if (renamingPageId && renameInputRef.current) renameInputRef.current.focus()
+  }, [renamingPageId])
+
   const loadWhiteboard = async (uid: string, courseId: string) => {
     const wb = await api.getWhiteboard(courseId, uid).catch(() => null)
-    if (wb) {
-      setNotes(wb.sticky_notes || [])
-      setPdfUrl(wb.pdf_url || null)
-      setPdfName(wb.pdf_name || null)
+    if (!wb) return
+
+    const rawNotes: StickyNote[] = wb.sticky_notes || []
+
+    if (wb.pages && Array.isArray(wb.pages) && wb.pages.length > 0) {
+      // New multi-page format
+      setPages(wb.pages)
+      setActivePageId(wb.pages[0].id)
+      setNotes(rawNotes)
+    } else {
+      // Legacy single-page: migrate
+      const defaultPage: Page = {
+        id: crypto.randomUUID(),
+        name: 'Page 1',
+        pdf_url: wb.pdf_url || null,
+        pdf_name: wb.pdf_name || null,
+      }
+      setPages([defaultPage])
+      setActivePageId(defaultPage.id)
+      // Assign all legacy notes to this page
+      setNotes(rawNotes.map((n: StickyNote) => ({ ...n, page_id: defaultPage.id })))
     }
   }
 
   const switchCourse = async (courseId: string) => {
     setSelectedCourse(courseId)
-    setNumPages(0)
+    setPages([])
+    setActivePageId(null)
     setPdfError(null)
     setFlashcardGenStatus(null)
+    setNotes([])
     if (userId) loadWhiteboard(userId, courseId)
   }
 
   // ── Auto-save ─────────────────────────────────────────────
-  const scheduleSave = useCallback((updatedNotes: StickyNote[]) => {
+  const scheduleSave = useCallback((updatedNotes: StickyNote[], updatedPages?: Page[]) => {
     if (!userId || !selectedCourse) return
+    const pgs = updatedPages ?? pages
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(async () => {
       setSaving(true)
       try {
-        await api.saveWhiteboard({ course_id: selectedCourse, user_id: userId, sticky_notes: updatedNotes, pdf_name: pdfName, pdf_url: pdfUrl })
+        await api.saveWhiteboard({
+          course_id: selectedCourse,
+          user_id: userId,
+          sticky_notes: updatedNotes,
+          pages: pgs,
+          pdf_url: pgs[0]?.pdf_url || null,
+          pdf_name: pgs[0]?.pdf_name || null,
+        })
       } finally { setSaving(false) }
     }, 1500)
-  }, [userId, selectedCourse, pdfName, pdfUrl])
+  }, [userId, selectedCourse, pages])
 
   const updateNotes = (updated: StickyNote[]) => {
     setNotes(updated)
     scheduleSave(updated)
   }
 
+  const updatePages = (updated: Page[]) => {
+    setPages(updated)
+    scheduleSave(notes, updated)
+  }
+
+  // ── Page management ───────────────────────────────────────
+  const addPage = () => {
+    const newPage: Page = {
+      id: crypto.randomUUID(),
+      name: `Page ${pages.length + 1}`,
+      pdf_url: null,
+      pdf_name: null,
+    }
+    const updated = [...pages, newPage]
+    updatePages(updated)
+    setActivePageId(newPage.id)
+    // Start renaming immediately
+    setRenamingPageId(newPage.id)
+    setRenameValue(newPage.name)
+  }
+
+  const deletePage = (pageId: string) => {
+    if (pages.length <= 1) return
+    const updated = pages.filter(p => p.id !== pageId)
+    // Remove notes for this page
+    const updatedNotes = notes.filter(n => n.page_id !== pageId)
+    setNotes(updatedNotes)
+    updatePages(updated)
+    if (activePageId === pageId) setActivePageId(updated[0].id)
+    scheduleSave(updatedNotes, updated)
+  }
+
+  const commitRename = () => {
+    if (!renamingPageId) return
+    const trimmed = renameValue.trim()
+    const updated = pages.map(p => p.id === renamingPageId ? { ...p, name: trimmed || p.name } : p)
+    setRenamingPageId(null)
+    updatePages(updated)
+  }
+
   // ── PDF upload ────────────────────────────────────────────
   const uploadPdf = async (file: File) => {
-    if (!userId || !selectedCourse) return
+    if (!userId || !selectedCourse || !activePageId) return
     setSaving(true)
     setFlashcardGenStatus(null)
     try {
@@ -235,12 +329,22 @@ function WhiteboardInner() {
       })
       if (!res.ok) { const e = await res.json().catch(() => ({})); alert('Upload failed: ' + (e.detail || res.statusText)); return }
       const { pdf_url, pdf_name } = await res.json()
-      setPdfUrl(pdf_url)
-      setPdfName(pdf_name)
-      if (saveTimer.current) clearTimeout(saveTimer.current)
-      await api.saveWhiteboard({ course_id: selectedCourse, user_id: userId, sticky_notes: notes, pdf_name: pdf_name, pdf_url: pdf_url })
 
-      // Auto-generate a flashcard set from the uploaded PDF in the background
+      // Update the active page with the new PDF
+      const updatedPages = pages.map(p => p.id === activePageId ? { ...p, pdf_url, pdf_name } : p)
+      setPages(updatedPages)
+
+      if (saveTimer.current) clearTimeout(saveTimer.current)
+      await api.saveWhiteboard({
+        course_id: selectedCourse,
+        user_id: userId,
+        sticky_notes: notes,
+        pages: updatedPages,
+        pdf_url: updatedPages[0]?.pdf_url || null,
+        pdf_name: updatedPages[0]?.pdf_name || null,
+      })
+
+      // Auto-generate flashcards
       setFlashcardGenStatus('generating')
       const courseName = courses.find(c => c.id === selectedCourse)?.name || 'Module'
       const setTitle = pdf_name.replace(/\.pdf$/i, '') || courseName
@@ -250,26 +354,22 @@ function WhiteboardInner() {
       fcForm.append('course_id', selectedCourse)
       fcForm.append('title', setTitle)
       fetch(`${process.env.NEXT_PUBLIC_API_URL}/flashcards/generate`, { method: 'POST', body: fcForm })
-        .then(r => {
-          if (r.ok) setFlashcardGenStatus('done')
-          else setFlashcardGenStatus('error')
-        })
+        .then(r => { if (r.ok) setFlashcardGenStatus('done'); else setFlashcardGenStatus('error') })
         .catch(() => setFlashcardGenStatus('error'))
     } finally { setSaving(false) }
   }
 
   // ── Canvas interaction ────────────────────────────────────
   const handleCanvasDoubleClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!selectedCourse) return
+    if (!selectedCourse || !activePageId) return
     const rect = canvasRef.current!.getBoundingClientRect()
-    const note = newNote(e.clientX - rect.left, e.clientY - rect.top, selection || undefined)
+    const note = newNote(e.clientX - rect.left, e.clientY - rect.top, activePageId, selection || undefined)
     const updated = [...notes, note]
     updateNotes(updated)
     setActiveNote(note.id)
     setSelection('')
   }
 
-  // Track text selection on the PDF area
   const handleMouseUp = () => {
     const sel = window.getSelection()?.toString().trim()
     if (sel) setSelection(sel)
@@ -283,9 +383,9 @@ function WhiteboardInner() {
   }
 
   const createNoteFromContext = () => {
-    if (!contextMenu || !canvasRef.current) return
+    if (!contextMenu || !canvasRef.current || !activePageId) return
     const rect = canvasRef.current.getBoundingClientRect()
-    const note = newNote(contextMenu.x - rect.left, contextMenu.y - rect.top, contextMenu.text)
+    const note = newNote(contextMenu.x - rect.left, contextMenu.y - rect.top, activePageId, contextMenu.text)
     note.page_number = contextMenu.page
     const updated = [...notes, note]
     updateNotes(updated)
@@ -309,10 +409,7 @@ function WhiteboardInner() {
         : n))
     }
     const onUp = () => {
-      if (dragging) {
-        setDragging(null)
-        scheduleSave(notes)
-      }
+      if (dragging) { setDragging(null); scheduleSave(notes) }
     }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
@@ -328,7 +425,6 @@ function WhiteboardInner() {
     setChatInput(prev => ({ ...prev, [noteId]: '' }))
     setLoadingChat(prev => ({ ...prev, [noteId]: true }))
 
-    // Optimistically add user message
     const withUser = notes.map(n => n.id === noteId
       ? { ...n, messages: [...n.messages, { role: 'user' as const, content: msg }] }
       : n)
@@ -342,7 +438,7 @@ function WhiteboardInner() {
         message: msg,
         prior_messages: note.messages,
         highlight_text: note.highlight_text || undefined,
-        pdf_url: pdfUrl || undefined,
+        pdf_url: activePage?.pdf_url || undefined,
         page_number: note.page_number || undefined,
       })
       const updated = notes.map(n => n.id === noteId ? { ...n, messages: res.messages } : n)
@@ -376,6 +472,8 @@ function WhiteboardInner() {
     updateNotes(updated)
   }
 
+  const pdfUrl = activePage?.pdf_url || null
+
   return (
     <div className="flex h-screen flex-col" style={{ fontFamily: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", backgroundColor: '#FFFFFF', color: '#37352F' }}>
       {/* Header */}
@@ -390,6 +488,7 @@ function WhiteboardInner() {
           {saving && <span className="text-xs animate-pulse" style={{ color: 'rgba(55,53,47,0.4)' }}>Saving…</span>}
         </div>
 
+        {/* Module selector */}
         <div className="flex items-center gap-1.5">
           {courses.map(c => (
             <button key={c.id} onClick={() => switchCourse(c.id)}
@@ -405,14 +504,14 @@ function WhiteboardInner() {
         </div>
 
         <div className="flex items-center gap-2">
-          {selectedCourse && (
+          {selectedCourse && activePageId && (
             <>
               <button onClick={() => fileInputRef.current?.click()}
                 className="rounded px-3 py-1.5 text-xs transition"
                 style={{ border: '1px solid #EDEDED', color: '#37352F', backgroundColor: '#FFFFFF' }}
                 onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#EFEFED')}
                 onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#FFFFFF')}>
-                Upload PDF
+                {pdfUrl ? 'Replace PDF' : 'Upload PDF'}
               </button>
               <input ref={fileInputRef} type="file" accept="application/pdf" className="hidden"
                 onChange={e => e.target.files?.[0] && uploadPdf(e.target.files[0])} />
@@ -424,8 +523,7 @@ function WhiteboardInner() {
             </div>
           )}
           {flashcardGenStatus === 'done' && (
-            <div
-              className="flex cursor-pointer items-center gap-1.5 rounded px-3 py-1.5 text-xs"
+            <div className="flex cursor-pointer items-center gap-1.5 rounded px-3 py-1.5 text-xs"
               style={{ backgroundColor: '#F0FDF4', border: '1px solid #86EFAC', color: '#16A34A' }}
               onClick={() => selectedCourse && router.push(`/flashcards?course=${selectedCourse}`)}>
               ✓ Flashcards ready — view →
@@ -442,11 +540,10 @@ function WhiteboardInner() {
               <span style={{ color: '#B45309' }}>— double-click to annotate</span>
             </div>
           )}
-          <span className="text-xs" style={{ color: 'rgba(55,53,47,0.4)' }}>Double-click canvas to add note</span>
         </div>
       </div>
 
-      {/* Canvas */}
+      {/* Body */}
       {!selectedCourse ? (
         <div className="flex flex-1 items-center justify-center">
           <div className="text-center">
@@ -455,174 +552,269 @@ function WhiteboardInner() {
           </div>
         </div>
       ) : (
-        <div className="relative flex flex-1 overflow-hidden">
-          <div
-            ref={canvasRef}
-            onDoubleClick={pdfUrl ? undefined : handleCanvasDoubleClick}
-            onMouseUp={handleMouseUp}
-            className="relative flex-1 overflow-hidden"
-            style={{ userSelect: 'text', backgroundColor: '#FFFFFF' }}
-          >
-            {pdfUrl ? (
-              <div className="absolute inset-0 overflow-auto flex flex-col items-center bg-gray-100 py-4 gap-2">
-                {pdfError ? (
-                  <div className="flex flex-col items-center justify-center h-full gap-4">
-                    <div className="text-sm" style={{ color: '#991B1B' }}>{pdfError}</div>
-                    <button onClick={() => { setPdfError(null); setPdfUrl(null); setPdfName(null) }}
-                      className="rounded px-3 py-1.5 text-xs"
-                      style={{ border: '1px solid #EDEDED', color: '#37352F' }}>
-                      Remove PDF
-                    </button>
+        <div className="flex flex-1 overflow-hidden">
+          {/* ── Left sidebar: pages ── */}
+          <div className="flex flex-col shrink-0" style={{ width: 220, borderRight: '1px solid #EDEDED', backgroundColor: '#FBFBFA' }}>
+            <div className="px-4 py-3" style={{ borderBottom: '1px solid #EDEDED' }}>
+              <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'rgba(55,53,47,0.4)' }}>Pages</span>
+            </div>
+
+            <div className="flex-1 overflow-y-auto py-1">
+              {pages.map(page => (
+                <div key={page.id}
+                  onClick={() => { if (renamingPageId !== page.id) setActivePageId(page.id) }}
+                  className="group flex items-start gap-2 px-3 py-2 cursor-pointer transition-colors"
+                  style={{
+                    backgroundColor: activePageId === page.id ? '#EFEFED' : 'transparent',
+                  }}
+                  onMouseEnter={e => { if (activePageId !== page.id) (e.currentTarget as HTMLElement).style.backgroundColor = '#F5F5F4' }}
+                  onMouseLeave={e => { if (activePageId !== page.id) (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent' }}
+                >
+                  <span className="mt-0.5 text-xs shrink-0" style={{ color: activePageId === page.id ? '#37352F' : 'rgba(55,53,47,0.4)' }}>
+                    📄
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    {renamingPageId === page.id ? (
+                      <input
+                        ref={renameInputRef}
+                        value={renameValue}
+                        onChange={e => setRenameValue(e.target.value)}
+                        onBlur={commitRename}
+                        onKeyDown={e => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') setRenamingPageId(null) }}
+                        onClick={e => e.stopPropagation()}
+                        className="w-full rounded px-1 py-0 text-xs focus:outline-none"
+                        style={{ backgroundColor: '#FFFFFF', border: '1px solid #93C5FD', color: '#37352F' }}
+                      />
+                    ) : (
+                      <div
+                        className="truncate text-xs font-medium"
+                        style={{ color: activePageId === page.id ? '#37352F' : 'rgba(55,53,47,0.7)' }}
+                        onDoubleClick={e => {
+                          e.stopPropagation()
+                          setRenamingPageId(page.id)
+                          setRenameValue(page.name)
+                        }}
+                        title="Double-click to rename"
+                      >
+                        {page.name}
+                      </div>
+                    )}
+                    <div className="mt-0.5 truncate text-xs" style={{ color: 'rgba(55,53,47,0.4)' }}>
+                      {page.pdf_name
+                        ? page.pdf_name.replace(/\.pdf$/i, '')
+                        : <span className="italic">No PDF</span>
+                      }
+                    </div>
                   </div>
-                ) : (
-                  <PDFViewer
-                    pdfUrl={pdfUrl}
-                    numPages={numPages}
-                    pageWidth={pageWidth}
-                    onLoadSuccess={(n) => { setNumPages(n); setPdfError(null) }}
-                    onLoadError={(err) => setPdfError(`Failed to load PDF: ${err.message}`)}
-                    onMouseUp={handleMouseUp}
-                    onContextMenu={handleContextMenu}
-                    onDoubleClick={(e, page) => {
-                      if (!canvasRef.current) return
-                      const rect = canvasRef.current.getBoundingClientRect()
-                      const note = newNote(e.clientX - rect.left, e.clientY - rect.top, selection || undefined)
-                      note.page_number = page
+                  <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={e => { e.stopPropagation(); setRenamingPageId(page.id); setRenameValue(page.name) }}
+                      className="rounded p-0.5 text-xs transition hover:bg-black/10"
+                      style={{ color: 'rgba(55,53,47,0.5)' }}
+                      title="Rename">
+                      ✎
+                    </button>
+                    {pages.length > 1 && (
+                      <button
+                        onClick={e => { e.stopPropagation(); deletePage(page.id) }}
+                        className="rounded p-0.5 text-xs transition hover:bg-red-100"
+                        style={{ color: 'rgba(55,53,47,0.5)' }}
+                        title="Delete page">
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="p-2" style={{ borderTop: '1px solid #EDEDED' }}>
+              <button
+                onClick={addPage}
+                className="w-full rounded px-3 py-2 text-xs transition text-left"
+                style={{ color: 'rgba(55,53,47,0.6)', border: '1px dashed #DEDEDE', backgroundColor: 'transparent' }}
+                onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#EFEFED')}
+                onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}>
+                + Add page
+              </button>
+            </div>
+          </div>
+
+          {/* ── Main canvas ── */}
+          <div className="relative flex flex-1 overflow-hidden">
+            <div
+              ref={canvasRef}
+              onDoubleClick={pdfUrl ? undefined : handleCanvasDoubleClick}
+              onMouseUp={handleMouseUp}
+              className="relative flex-1 overflow-hidden"
+              style={{ userSelect: 'text', backgroundColor: '#FFFFFF' }}
+            >
+              {pdfUrl ? (
+                <div className="absolute inset-0 overflow-auto flex flex-col items-center bg-gray-100 py-4 gap-2">
+                  {pdfError ? (
+                    <div className="flex flex-col items-center justify-center h-full gap-4">
+                      <div className="text-sm" style={{ color: '#991B1B' }}>{pdfError}</div>
+                      <button
+                        onClick={() => {
+                          setPdfError(null)
+                          const updated = pages.map(p => p.id === activePageId ? { ...p, pdf_url: null, pdf_name: null } : p)
+                          updatePages(updated)
+                        }}
+                        className="rounded px-3 py-1.5 text-xs"
+                        style={{ border: '1px solid #EDEDED', color: '#37352F' }}>
+                        Remove PDF
+                      </button>
+                    </div>
+                  ) : (
+                    <PDFViewer
+                      pdfUrl={pdfUrl}
+                      numPages={numPages}
+                      pageWidth={pageWidth}
+                      onLoadSuccess={(n) => { setNumPages(n); setPdfError(null) }}
+                      onLoadError={(err) => setPdfError(`Failed to load PDF: ${err.message}`)}
+                      onMouseUp={handleMouseUp}
+                      onContextMenu={handleContextMenu}
+                      onDoubleClick={(e, page) => {
+                        if (!canvasRef.current || !activePageId) return
+                        const rect = canvasRef.current.getBoundingClientRect()
+                        const note = newNote(e.clientX - rect.left, e.clientY - rect.top, activePageId, selection || undefined)
+                        note.page_number = page
+                        const updated = [...notes, note]
+                        updateNotes(updated)
+                        setActiveNote(note.id)
+                        setSelection('')
+                      }}
+                    />
+                  )}
+                </div>
+              ) : (
+                <div className="flex h-full flex-col items-center justify-center">
+                  <div className="mb-4 text-6xl">📄</div>
+                  <div className="mb-2 text-lg font-medium" style={{ color: '#37352F' }}>No PDF loaded</div>
+                  <div className="mb-6 text-sm" style={{ color: 'rgba(55,53,47,0.5)' }}>Upload lecture notes or study material for this page</div>
+                  <button onClick={() => fileInputRef.current?.click()}
+                    className="rounded-lg px-5 py-2.5 text-sm font-medium transition"
+                    style={{ backgroundColor: '#37352F', color: '#FFFFFF' }}
+                    onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#2f2b26')}
+                    onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#37352F')}>
+                    Upload PDF
+                  </button>
+                  <div className="mt-6 text-xs" style={{ color: 'rgba(55,53,47,0.4)' }}>Or double-click anywhere to add a note without a PDF</div>
+                </div>
+              )}
+
+              {/* Notes overlay */}
+              <div className="absolute inset-0 pointer-events-none">
+                {activeNotes.map(note => (
+                  <div key={note.id}
+                    className="absolute select-none pointer-events-auto"
+                    style={{ left: note.x, top: note.y, width: note.width, zIndex: activeNote === note.id ? 100 : 10 }}
+                    onClick={() => setActiveNote(note.id)}
+                  >
+                    <div
+                      onMouseDown={e => startDrag(e, note.id)}
+                      className="flex cursor-grab items-center justify-between rounded-t-xl px-3 py-2 text-xs font-semibold active:cursor-grabbing"
+                      style={{ backgroundColor: note.color, color: '#37352F', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}
+                    >
+                      <span className="truncate max-w-45">{note.title}</span>
+                      <div className="flex items-center gap-1 ml-2 shrink-0">
+                        {note.parent_note_id && <span className="text-xs" style={{ color: 'rgba(55,53,47,0.5)' }}>⤷ fork</span>}
+                        <button onClick={e => { e.stopPropagation(); toggleMinimise(note.id) }}
+                          className="rounded p-0.5 transition hover:bg-black/10" style={{ color: 'rgba(55,53,47,0.6)' }}>
+                          {note.minimised ? '▼' : '▲'}
+                        </button>
+                        <button onClick={e => { e.stopPropagation(); forkNote(note.id) }}
+                          className="rounded p-0.5 transition hover:bg-black/10" style={{ color: 'rgba(55,53,47,0.6)' }} title="Fork into new thread">
+                          ⑂
+                        </button>
+                        <button onClick={e => { e.stopPropagation(); deleteNote(note.id) }}
+                          className="rounded p-0.5 transition hover:bg-black/10" style={{ color: 'rgba(55,53,47,0.6)' }}>
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+
+                    {!note.minimised && (
+                      <div className="rounded-b-xl border border-t-0"
+                        style={{ backgroundColor: note.color + 'dd', borderColor: note.color, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>
+
+                        {note.highlight_text && (
+                          <div className="mx-3 mt-2 rounded px-2 py-1.5 text-xs italic"
+                            style={{ borderLeft: '2px solid rgba(55,53,47,0.2)', backgroundColor: 'rgba(255,255,255,0.4)', color: 'rgba(55,53,47,0.7)' }}>
+                            "{note.highlight_text.slice(0, 120)}{note.highlight_text.length > 120 ? '…' : ''}"
+                          </div>
+                        )}
+
+                        <div className="max-h-60 overflow-y-auto p-3 space-y-2">
+                          {note.messages.length === 0 && (
+                            <div className="text-xs italic text-center py-2" style={{ color: 'rgba(55,53,47,0.5)' }}>
+                              Ask Claude anything about this{note.highlight_text ? ' excerpt' : ' topic'}…
+                            </div>
+                          )}
+                          {note.messages.map((m, i) => (
+                            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                              <div className="max-w-[85%] rounded-lg px-2.5 py-1.5 text-xs leading-relaxed"
+                                style={m.role === 'user'
+                                  ? { backgroundColor: '#37352F', color: '#FFFFFF' }
+                                  : { backgroundColor: 'rgba(255,255,255,0.8)', color: '#37352F', border: '1px solid rgba(55,53,47,0.1)' }}>
+                                {m.role === 'assistant' ? renderMarkdown(m.content) : m.content}
+                              </div>
+                            </div>
+                          ))}
+                          {loadingChat[note.id] && (
+                            <div className="flex justify-start">
+                              <div className="rounded-lg px-3 py-2 text-xs animate-pulse"
+                                style={{ backgroundColor: 'rgba(255,255,255,0.8)', color: 'rgba(55,53,47,0.5)', border: '1px solid rgba(55,53,47,0.1)' }}>
+                                Thinking…
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex gap-1.5 p-2" style={{ borderTop: '1px solid rgba(55,53,47,0.1)' }}>
+                          <input
+                            type="text"
+                            value={chatInput[note.id] || ''}
+                            onChange={e => setChatInput(prev => ({ ...prev, [note.id]: e.target.value }))}
+                            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(note.id) } }}
+                            placeholder="Ask Claude…"
+                            className="flex-1 rounded px-2.5 py-1.5 text-xs focus:outline-none"
+                            style={{ backgroundColor: 'rgba(255,255,255,0.7)', border: '1px solid rgba(55,53,47,0.15)', color: '#37352F' }}
+                            onClick={e => e.stopPropagation()}
+                          />
+                          <button onClick={e => { e.stopPropagation(); sendChat(note.id) }}
+                            disabled={!chatInput[note.id]?.trim() || loadingChat[note.id]}
+                            className="rounded px-2.5 py-1.5 text-xs transition disabled:opacity-40"
+                            style={{ backgroundColor: '#37352F', color: '#FFFFFF' }}>
+                            →
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+                {pdfUrl && (
+                  <button
+                    onClick={() => {
+                      if (!activePageId) return
+                      const note = newNote(40, 40, activePageId)
                       const updated = [...notes, note]
                       updateNotes(updated)
                       setActiveNote(note.id)
-                      setSelection('')
                     }}
-                  />
+                    className="pointer-events-auto absolute bottom-4 right-4 rounded-full px-4 py-2 text-sm font-medium text-white shadow-lg transition hover:opacity-90"
+                    style={{ backgroundColor: '#37352F' }}>
+                    + Add note
+                  </button>
                 )}
               </div>
-            ) : (
-              <div className="flex h-full flex-col items-center justify-center">
-                <div className="mb-4 text-6xl">📄</div>
-                <div className="mb-2 text-lg font-medium" style={{ color: '#37352F' }}>No PDF loaded</div>
-                <div className="mb-6 text-sm" style={{ color: 'rgba(55,53,47,0.5)' }}>Upload your lecture notes or study material</div>
-                <button onClick={() => fileInputRef.current?.click()}
-                  className="rounded-lg px-5 py-2.5 text-sm font-medium transition"
-                  style={{ backgroundColor: '#37352F', color: '#FFFFFF' }}
-                  onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#2f2b26')}
-                  onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#37352F')}>
-                  Upload PDF
-                </button>
-                <div className="mt-6 text-xs" style={{ color: 'rgba(55,53,47,0.4)' }}>Or double-click anywhere to add a note without a PDF</div>
-              </div>
-            )}
-
-            {/* Notes overlay — pointer-events-none so PDF stays interactive; notes themselves get pointer-events-auto */}
-            <div className="absolute inset-0 pointer-events-none">
-            {notes.map(note => (
-              <div key={note.id}
-                className="absolute select-none pointer-events-auto"
-                style={{ left: note.x, top: note.y, width: note.width, zIndex: activeNote === note.id ? 100 : 10 }}
-                onClick={() => setActiveNote(note.id)}
-              >
-                {/* Note header — drag handle */}
-                <div
-                  onMouseDown={e => startDrag(e, note.id)}
-                  className="flex cursor-grab items-center justify-between rounded-t-xl px-3 py-2 text-xs font-semibold active:cursor-grabbing"
-                  style={{ backgroundColor: note.color, color: '#37352F', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}
-                >
-                  <span className="truncate max-w-45">{note.title}</span>
-                  <div className="flex items-center gap-1 ml-2 shrink-0">
-                    {note.parent_note_id && <span className="text-xs" style={{ color: 'rgba(55,53,47,0.5)' }}>⤷ fork</span>}
-                    <button onClick={e => { e.stopPropagation(); toggleMinimise(note.id) }}
-                      className="rounded p-0.5 transition hover:bg-black/10" style={{ color: 'rgba(55,53,47,0.6)' }}>
-                      {note.minimised ? '▼' : '▲'}
-                    </button>
-                    <button onClick={e => { e.stopPropagation(); forkNote(note.id) }}
-                      className="rounded p-0.5 transition hover:bg-black/10" style={{ color: 'rgba(55,53,47,0.6)' }} title="Fork into new thread">
-                      ⑂
-                    </button>
-                    <button onClick={e => { e.stopPropagation(); deleteNote(note.id) }}
-                      className="rounded p-0.5 transition hover:bg-black/10" style={{ color: 'rgba(55,53,47,0.6)' }}>
-                      ✕
-                    </button>
-                  </div>
-                </div>
-
-                {!note.minimised && (
-                  <div className="rounded-b-xl border border-t-0"
-                    style={{ backgroundColor: note.color + 'dd', borderColor: note.color, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>
-
-                    {note.highlight_text && (
-                      <div className="mx-3 mt-2 rounded px-2 py-1.5 text-xs italic"
-                        style={{ borderLeft: '2px solid rgba(55,53,47,0.2)', backgroundColor: 'rgba(255,255,255,0.4)', color: 'rgba(55,53,47,0.7)' }}>
-                        "{note.highlight_text.slice(0, 120)}{note.highlight_text.length > 120 ? '…' : ''}"
-                      </div>
-                    )}
-
-                    <div className="max-h-60 overflow-y-auto p-3 space-y-2">
-                      {note.messages.length === 0 && (
-                        <div className="text-xs italic text-center py-2" style={{ color: 'rgba(55,53,47,0.5)' }}>
-                          Ask Claude anything about this{note.highlight_text ? ' excerpt' : ' topic'}…
-                        </div>
-                      )}
-                      {note.messages.map((m, i) => (
-                        <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                          <div className={`max-w-[85%] rounded-lg px-2.5 py-1.5 text-xs leading-relaxed`}
-                            style={m.role === 'user'
-                              ? { backgroundColor: '#37352F', color: '#FFFFFF' }
-                              : { backgroundColor: 'rgba(255,255,255,0.8)', color: '#37352F', border: '1px solid rgba(55,53,47,0.1)' }}>
-                            {m.role === 'assistant' ? renderMarkdown(m.content) : m.content}
-                          </div>
-                        </div>
-                      ))}
-                      {loadingChat[note.id] && (
-                        <div className="flex justify-start">
-                          <div className="rounded-lg px-3 py-2 text-xs animate-pulse"
-                            style={{ backgroundColor: 'rgba(255,255,255,0.8)', color: 'rgba(55,53,47,0.5)', border: '1px solid rgba(55,53,47,0.1)' }}>
-                            Thinking…
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="flex gap-1.5 p-2" style={{ borderTop: '1px solid rgba(55,53,47,0.1)' }}>
-                      <input
-                        type="text"
-                        value={chatInput[note.id] || ''}
-                        onChange={e => setChatInput(prev => ({ ...prev, [note.id]: e.target.value }))}
-                        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(note.id) } }}
-                        placeholder="Ask Claude…"
-                        className="flex-1 rounded px-2.5 py-1.5 text-xs focus:outline-none"
-                        style={{ backgroundColor: 'rgba(255,255,255,0.7)', border: '1px solid rgba(55,53,47,0.15)', color: '#37352F' }}
-                        onClick={e => e.stopPropagation()}
-                      />
-                      <button onClick={e => { e.stopPropagation(); sendChat(note.id) }}
-                        disabled={!chatInput[note.id]?.trim() || loadingChat[note.id]}
-                        className="rounded px-2.5 py-1.5 text-xs transition disabled:opacity-40"
-                        style={{ backgroundColor: '#37352F', color: '#FFFFFF' }}>
-                        →
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
-            {/* Add note button when PDF is loaded (can't double-click iframe) */}
-            {pdfUrl && (
-              <button
-                onClick={() => {
-                  const note = newNote(40, 40)
-                  const updated = [...notes, note]
-                  updateNotes(updated)
-                  setActiveNote(note.id)
-                }}
-                className="pointer-events-auto absolute bottom-4 right-4 rounded-full px-4 py-2 text-sm font-medium text-white shadow-lg transition hover:opacity-90"
-                style={{ backgroundColor: '#37352F' }}>
-                + Add note
-              </button>
-            )}
             </div>
           </div>
         </div>
       )}
 
-      {/* ── Right-click context menu ── */}
+      {/* Right-click context menu */}
       {contextMenu && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setContextMenu(null)} />

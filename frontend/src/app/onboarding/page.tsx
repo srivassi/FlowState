@@ -166,7 +166,7 @@ export default function Onboarding() {
       {/* Header */}
       <div className="border-b border-gray-200 bg-white px-6 py-4">
         <div className="mx-auto flex max-w-2xl items-center justify-between">
-          <h1 className="text-lg font-bold text-gray-800">Study Planner Setup</h1>
+          <h1 className="text-lg font-bold text-gray-800">Flowstate Setup</h1>
           <div className="flex gap-2">
             {[1, 2, 3].map(s => (
               <div key={s} className={`h-2 w-8 rounded-full transition-colors ${step >= s ? 'bg-blue-500' : 'bg-gray-200'}`} />

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Study Planner Agent",
+  title: "Flowstate",
   description: "AI-powered study planning",
 };
 

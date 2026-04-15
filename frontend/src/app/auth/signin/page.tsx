@@ -36,7 +36,7 @@ export default function SignIn() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
       <div className="bg-white p-8 rounded-lg shadow-lg max-w-md w-full">
         <h1 className="text-2xl font-bold text-center mb-6 text-gray-800">
-          Sign In to Study Planner
+          Sign in to Flowstate
         </h1>
         
         {error && (

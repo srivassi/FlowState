@@ -86,6 +86,7 @@ export default function Dashboard() {
   const [eodNotes, setEodNotes] = useState('')
   const [eodSubmitting, setEodSubmitting] = useState(false)
   const [courses, setCourses] = useState<Course[]>([])
+  const [deletingCourseId, setDeletingCourseId] = useState<string | null>(null)
   const [todayTasks, setTodayTasks] = useState<Task[]>([])
   const [profile, setProfile] = useState<any>(null)
   const [stats, setStats] = useState<Stats | null>(null)
@@ -181,6 +182,17 @@ export default function Dashboard() {
     setCourseTasks(tasks)
   }
 
+  const deleteCourse = async (courseId: string) => {
+    if (!confirm('Delete this module and all its tasks? This cannot be undone.')) return
+    setDeletingCourseId(courseId)
+    try {
+      await api.deleteCourse(courseId)
+      setCourses(prev => prev.filter(c => c.id !== courseId))
+      if (selectedCourse?.id === courseId) { setSelectedCourse(null); setCourseTasks([]) }
+    } catch (e) { console.error(e) }
+    finally { setDeletingCourseId(null) }
+  }
+
   const moveTask = async (task: Task, status: Task['status']) => {
     await api.updateTaskStatus(task.id, status)
     setCourseTasks(prev => prev.map(t => t.id === task.id ? { ...t, status } : t))
@@ -239,13 +251,21 @@ export default function Dashboard() {
           {/* Courses */}
           <div className="space-y-0.5">
             {courses.map(c => (
-              <div key={c.id} onClick={() => loadCourse(c)}
-                className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm transition-colors"
+              <div key={c.id}
+                className="group flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm transition-colors"
                 style={{ backgroundColor: selectedCourse?.id === c.id ? NOTION.hover : 'transparent', color: NOTION.text }}
                 onMouseEnter={e => { if (selectedCourse?.id !== c.id) (e.currentTarget as HTMLElement).style.backgroundColor = NOTION.hover }}
                 onMouseLeave={e => { if (selectedCourse?.id !== c.id) (e.currentTarget as HTMLElement).style.backgroundColor = 'transparent' }}>
-                <div className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: c.color }} />
-                <span className="truncate">{c.name}</span>
+                <div className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: c.color }} onClick={() => loadCourse(c)} />
+                <span className="flex-1 truncate" onClick={() => loadCourse(c)}>{c.name}</span>
+                <button
+                  onClick={e => { e.stopPropagation(); deleteCourse(c.id) }}
+                  disabled={deletingCourseId === c.id}
+                  className="shrink-0 rounded p-0.5 text-xs opacity-0 transition group-hover:opacity-100 hover:bg-red-100 hover:text-red-500 disabled:opacity-40"
+                  style={{ color: NOTION.muted }}
+                  title="Delete module">
+                  {deletingCourseId === c.id ? '…' : '✕'}
+                </button>
               </div>
             ))}
             <Link href="/modules/new"

@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { supabase } from '../../../lib/supabase'
 import { api } from '../../../lib/api'
@@ -30,6 +30,67 @@ type FlashcardSet = {
   id: string
   title: string
   course_id: string
+}
+
+// ── Card content renderer (supports fenced code blocks + images + inline bold/code) ──
+
+function renderInline(text: string): React.ReactNode {
+  const parts: React.ReactNode[] = []
+  const regex = /(\*\*(.+?)\*\*|`([^`]+)`)/g
+  let last = 0
+  let m: RegExpExecArray | null
+  while ((m = regex.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index))
+    if (m[0].startsWith('**')) parts.push(<strong key={m.index}>{m[2]}</strong>)
+    else parts.push(<code key={m.index} style={{ backgroundColor: 'rgba(55,53,47,0.08)', borderRadius: 3, padding: '1px 4px', fontFamily: 'monospace', fontSize: '0.88em' }}>{m[3]}</code>)
+    last = m.index + m[0].length
+  }
+  if (last < text.length) parts.push(text.slice(last))
+  return parts.length === 1 && typeof parts[0] === 'string' ? parts[0] : <>{parts}</>
+}
+
+function renderCardContent(text: string): React.ReactNode {
+  const nodes: React.ReactNode[] = []
+  const combined = /```(\w*)\n?([\s\S]*?)```|!\[([^\]]*)\]\(([^)]+)\)/g
+  let last = 0
+  let m: RegExpExecArray | null
+
+  while ((m = combined.exec(text)) !== null) {
+    if (m.index > last) {
+      const chunk = text.slice(last, m.index)
+      chunk.split('\n').forEach((line, li) => {
+        if (li > 0) nodes.push(<br key={`br-${m!.index}-${li}`} />)
+        nodes.push(<span key={`t-${m!.index}-${li}`}>{renderInline(line)}</span>)
+      })
+    }
+    if (m[0].startsWith('```')) {
+      const lang = m[1] || ''
+      const code = m[2].trim()
+      nodes.push(
+        <pre key={m.index} style={{ backgroundColor: 'rgba(55,53,47,0.06)', border: '1px solid rgba(55,53,47,0.1)', borderRadius: 6, padding: '10px 14px', fontFamily: 'monospace', fontSize: '0.82em', overflowX: 'auto', textAlign: 'left', margin: '8px 0', lineHeight: 1.55 }}>
+          {lang && <div style={{ fontSize: '0.75em', color: 'rgba(55,53,47,0.4)', marginBottom: 4 }}>{lang}</div>}
+          <code>{code}</code>
+        </pre>
+      )
+    } else {
+      const alt = m[3] || ''
+      const url = m[4]
+      nodes.push(
+        <img key={m.index} src={url} alt={alt} style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 6, margin: '8px auto', display: 'block', objectFit: 'contain' }} />
+      )
+    }
+    last = m.index + m[0].length
+  }
+
+  if (last < text.length) {
+    const chunk = text.slice(last)
+    chunk.split('\n').forEach((line, li) => {
+      if (li > 0) nodes.push(<br key={`end-br-${li}`} />)
+      nodes.push(<span key={`end-t-${li}`}>{renderInline(line)}</span>)
+    })
+  }
+
+  return <div style={{ textAlign: 'left' }}>{nodes}</div>
 }
 
 export default function StudyPage() {
@@ -272,8 +333,8 @@ export default function StudyPage() {
                   {flipped ? 'Answer' : 'Question'} · click to flip
                 </div>
                 <div className="flex min-h-[160px] items-center justify-center">
-                  <div className="text-lg leading-relaxed" style={{ color: NOTION.text }}>
-                    {flipped ? currentCard.answer : currentCard.question}
+                  <div className="w-full text-base leading-relaxed" style={{ color: NOTION.text }}>
+                    {renderCardContent(flipped ? currentCard.answer : currentCard.question)}
                   </div>
                 </div>
               </div>
@@ -316,10 +377,28 @@ function EditableCard({ card, index, onSave, onDelete, saving }: {
   const [q, setQ] = useState(card.question)
   const [a, setA] = useState(card.answer)
   const [dirty, setDirty] = useState(false)
+  const [uploading, setUploading] = useState<'q' | 'a' | null>(null)
+  const qImgRef = useRef<HTMLInputElement>(null)
+  const aImgRef = useRef<HTMLInputElement>(null)
 
   const NOTION_TEXT = '#37352F'
   const NOTION_BORDER = '#EDEDED'
   const NOTION_MUTED = 'rgba(55,53,47,0.65)'
+
+  const handleImageUpload = async (file: File, field: 'q' | 'a') => {
+    setUploading(field)
+    try {
+      const path = `flashcard-images/${card.id}/${crypto.randomUUID()}-${file.name}`
+      const { error } = await supabase.storage.from('whiteboards').upload(path, file, { contentType: file.type, upsert: true })
+      if (error) { alert('Image upload failed: ' + error.message); return }
+      const url = supabase.storage.from('whiteboards').getPublicUrl(path).data.publicUrl
+      const tag = `\n![image](${url})`
+      if (field === 'q') { setQ(prev => prev + tag); setDirty(true) }
+      else { setA(prev => prev + tag); setDirty(true) }
+    } finally {
+      setUploading(null)
+    }
+  }
 
   return (
     <div className="rounded-lg border p-4" style={{ borderColor: NOTION_BORDER }}>
@@ -329,24 +408,38 @@ function EditableCard({ card, index, onSave, onDelete, saving }: {
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <div className="mb-1 text-xs" style={{ color: NOTION_MUTED }}>Question</div>
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-xs" style={{ color: NOTION_MUTED }}>Question</span>
+            <button onClick={() => qImgRef.current?.click()} className="text-xs" style={{ color: NOTION_MUTED }} title="Insert image">
+              {uploading === 'q' ? '…' : '🖼'}
+            </button>
+          </div>
           <textarea
             value={q}
             onChange={e => { setQ(e.target.value); setDirty(true) }}
             rows={3}
             className="w-full resize-none rounded border px-3 py-2 text-sm outline-none"
-            style={{ borderColor: NOTION_BORDER, color: NOTION_TEXT }}
+            style={{ borderColor: NOTION_BORDER, color: NOTION_TEXT, fontFamily: 'monospace' }}
           />
+          <input ref={qImgRef} type="file" accept="image/*" className="hidden"
+            onChange={e => { if (e.target.files?.[0]) handleImageUpload(e.target.files[0], 'q'); e.target.value = '' }} />
         </div>
         <div>
-          <div className="mb-1 text-xs" style={{ color: NOTION_MUTED }}>Answer</div>
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-xs" style={{ color: NOTION_MUTED }}>Answer</span>
+            <button onClick={() => aImgRef.current?.click()} className="text-xs" style={{ color: NOTION_MUTED }} title="Insert image">
+              {uploading === 'a' ? '…' : '🖼'}
+            </button>
+          </div>
           <textarea
             value={a}
             onChange={e => { setA(e.target.value); setDirty(true) }}
             rows={3}
             className="w-full resize-none rounded border px-3 py-2 text-sm outline-none"
-            style={{ borderColor: NOTION_BORDER, color: NOTION_TEXT }}
+            style={{ borderColor: NOTION_BORDER, color: NOTION_TEXT, fontFamily: 'monospace' }}
           />
+          <input ref={aImgRef} type="file" accept="image/*" className="hidden"
+            onChange={e => { if (e.target.files?.[0]) handleImageUpload(e.target.files[0], 'a'); e.target.value = '' }} />
         </div>
       </div>
       {dirty && (

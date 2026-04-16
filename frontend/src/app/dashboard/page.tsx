@@ -462,6 +462,47 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {/* Motivator widget */}
+        {stats && (() => {
+          const doneToday = todayTasks.filter(t => t.status === 'done').length
+          const totalToday = todayTasks.length
+          const streak = stats.streak_days
+          const QUOTES = [
+            "Consistency beats intensity every time.",
+            "Every session builds the habit.",
+            "Progress, not perfection.",
+            "You showed up. That's half the battle.",
+            "Small steps, big outcomes.",
+            "The work you do today is the exam you ace tomorrow.",
+            "Momentum is everything — keep it going.",
+            "One focused hour beats three distracted ones.",
+          ]
+          const quote = QUOTES[(new Date().getDay() + streak) % QUOTES.length]
+          const pct = totalToday > 0 ? Math.round((doneToday / totalToday) * 100) : 0
+          return (
+            <div className="mx-3 mb-3 rounded-lg p-3" style={{ backgroundColor: '#FAFAF9', border: `1px solid ${NOTION.border}` }}>
+              {streak > 0 && (
+                <div className="mb-2 flex items-center gap-1.5">
+                  <span className="text-sm">🔥</span>
+                  <span className="text-xs font-semibold" style={{ color: NOTION.text }}>{streak} day streak</span>
+                </div>
+              )}
+              {totalToday > 0 && (
+                <div className="mb-2">
+                  <div className="mb-1 flex justify-between text-xs" style={{ color: NOTION.muted }}>
+                    <span>Today</span>
+                    <span>{doneToday}/{totalToday} tasks</span>
+                  </div>
+                  <div className="h-1 w-full rounded-full" style={{ backgroundColor: NOTION.border }}>
+                    <div className="h-1 rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: pct === 100 ? '#22c55e' : '#60a5fa' }} />
+                  </div>
+                </div>
+              )}
+              <div className="text-xs italic leading-relaxed" style={{ color: NOTION.muted }}>"{quote}"</div>
+            </div>
+          )
+        })()}
+
         {/* Profile + sign out */}
         <div className="mt-auto border-t p-3" style={{ borderColor: NOTION.border }}>
           {editingName ? (

@@ -36,11 +36,14 @@ type StickyNote = {
   content?: string        // body for text notes
 }
 
+type Section = { title: string; page: number; depth: number }
+
 type Page = {
   id: string
   name: string
   pdf_url: string | null
   pdf_name: string | null
+  sections?: Section[]
 }
 
 type Course = { id: string; name: string; color: string }
@@ -127,7 +130,7 @@ function PDFViewer({ pdfUrl, numPages, pageWidth, onLoadSuccess, onLoadError, on
       options={PDF_OPTIONS}
     >
       {Array.from({ length: numPages }, (_, i) => (
-        <div key={i} className="mb-2 shadow-md"
+        <div key={i} id={`pdf-page-${i + 1}`} className="mb-2 shadow-md"
           onMouseUp={onMouseUp}
           onContextMenu={(e: React.MouseEvent) => onContextMenu(e, i + 1)}
           onDoubleClick={(e: React.MouseEvent) => onDoubleClick(e, i + 1)}>
@@ -336,10 +339,10 @@ function WhiteboardInner() {
         body: formData,
       })
       if (!res.ok) { const e = await res.json().catch(() => ({})); alert('Upload failed: ' + (e.detail || res.statusText)); return }
-      const { pdf_url, pdf_name } = await res.json()
+      const { pdf_url, pdf_name, sections } = await res.json()
 
-      // Update the active page with the new PDF
-      const updatedPages = pages.map(p => p.id === activePageId ? { ...p, pdf_url, pdf_name } : p)
+      // Update the active page with the new PDF (and extracted sections)
+      const updatedPages = pages.map(p => p.id === activePageId ? { ...p, pdf_url, pdf_name, sections: sections || [] } : p)
       setPages(updatedPages)
 
       if (saveTimer.current) clearTimeout(saveTimer.current)
@@ -658,6 +661,32 @@ function WhiteboardInner() {
                 </div>
               ))}
             </div>
+
+            {/* Sections index (only if active page has a PDF with an outline) */}
+            {activePage?.sections && activePage.sections.length > 0 && (
+              <div style={{ borderTop: '1px solid #EDEDED' }}>
+                <div className="px-4 py-2 text-xs font-semibold uppercase tracking-wider" style={{ color: 'rgba(55,53,47,0.4)', minWidth: 220 }}>
+                  Sections
+                </div>
+                <div className="overflow-y-auto" style={{ maxHeight: 180, minWidth: 220 }}>
+                  {activePage.sections.map((s, i) => (
+                    <button
+                      key={i}
+                      onClick={() => document.getElementById(`pdf-page-${s.page}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                      className="w-full text-left py-1.5 text-xs transition-colors hover:bg-[#EFEFED] truncate"
+                      style={{
+                        paddingLeft: `${(s.depth || 0) * 10 + 16}px`,
+                        paddingRight: 12,
+                        color: 'rgba(55,53,47,0.7)',
+                        display: 'block',
+                      }}
+                      title={s.title}>
+                      {s.title}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="p-2" style={{ borderTop: '1px solid #EDEDED' }}>
               <button

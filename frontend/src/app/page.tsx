@@ -28,7 +28,9 @@ export default function Home() {
 
       {/* Nav */}
       <nav className="flex items-center justify-between px-8 py-5" style={{ borderBottom: '1px solid #EDEDED', backgroundColor: '#FBFBFA' }}>
-        <span className="text-lg font-bold tracking-tight" style={{ color: '#37352F' }}>Flowstate</span>
+        <span className="text-lg font-bold tracking-tight">
+          <span style={{ color: '#37352F' }}>Flow</span><span style={{ color: '#6366F1' }}>state</span>
+        </span>
         <div className="flex items-center gap-3">
           <Link href="/auth/signin"
             className="rounded px-4 py-1.5 text-sm transition-colors"
@@ -54,7 +56,7 @@ export default function Home() {
           Study smarter,<br />not harder.
         </h1>
         <p className="mx-auto mb-10 max-w-xl text-lg leading-relaxed" style={{ color: 'rgba(55,53,47,0.65)' }}>
-          Flowstate is an AI study planner that schedules your workload, keeps you in the zone with Pomodoro, and turns lecture notes into flashcards — automatically.
+          An AI-powered study planner that builds your schedule, annotates your notes, and turns lecture PDFs into flashcards — so you can spend less time organising and more time actually learning.
         </p>
         <div className="flex items-center justify-center gap-3">
           <Link href="/auth/signup"
@@ -129,7 +131,7 @@ export default function Home() {
 
       {/* Footer */}
       <footer className="border-t px-8 py-6 text-center text-xs" style={{ borderColor: '#EDEDED', color: 'rgba(55,53,47,0.4)' }}>
-        Flowstate — built with Claude
+        <span style={{ color: 'rgba(55,53,47,0.6)' }}>Flow</span><span style={{ color: '#6366F1', opacity: 0.7 }}>state</span>
       </footer>
     </div>
   )

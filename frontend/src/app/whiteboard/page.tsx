@@ -8,6 +8,8 @@ import Link from 'next/link'
 import { supabase } from '../../lib/supabase'
 import { api } from '../../lib/api'
 import _dynamic from 'next/dynamic'
+import katex from 'katex'
+import 'katex/dist/katex.min.css'
 
 const PDFDocument = _dynamic(() => import('react-pdf').then(async m => {
   const { pdfjs } = m
@@ -50,32 +52,52 @@ type Course = { id: string; name: string; color: string }
 
 const NOTE_COLORS = ['#FEF08A', '#BBF7D0', '#BFDBFE', '#FDE68A', '#F5D0FE', '#FECACA']
 
+function renderMath(tex: string, display: boolean): React.ReactNode {
+  try {
+    const html = katex.renderToString(tex, { displayMode: display, throwOnError: false, output: 'html' })
+    return <span key={tex} dangerouslySetInnerHTML={{ __html: html }} />
+  } catch {
+    return <span>{display ? `$$${tex}$$` : `$${tex}$`}</span>
+  }
+}
+
+function renderInlineContent(content: string): React.ReactNode[] {
+  const parts: React.ReactNode[] = []
+  // Match $$...$$ (display), $...$ (inline), **...**, `...`
+  const regex = /(\$\$[\s\S]+?\$\$|\$[^$\n]+?\$|\*\*(.+?)\*\*|`(.+?)`)/g
+  let last = 0
+  let match
+  let key = 0
+  while ((match = regex.exec(content)) !== null) {
+    if (match.index > last) parts.push(<span key={key++}>{content.slice(last, match.index)}</span>)
+    const m = match[0]
+    if (m.startsWith('$$')) {
+      parts.push(<span key={key++} style={{ display: 'block', textAlign: 'center', margin: '4px 0' }}>{renderMath(m.slice(2, -2).trim(), true)}</span>)
+    } else if (m.startsWith('$')) {
+      parts.push(<span key={key++}>{renderMath(m.slice(1, -1).trim(), false)}</span>)
+    } else if (m.startsWith('**')) {
+      parts.push(<strong key={key++}>{match[2]}</strong>)
+    } else {
+      parts.push(
+        <code key={key++} style={{ backgroundColor: 'rgba(55,53,47,0.08)', borderRadius: 3, padding: '0 3px', fontFamily: 'monospace', fontSize: '0.9em' }}>
+          {match[3]}
+        </code>
+      )
+    }
+    last = match.index + m.length
+  }
+  if (last < content.length) parts.push(<span key={key++}>{content.slice(last)}</span>)
+  return parts
+}
+
 function renderMarkdown(text: string): React.ReactNode {
   return text.split('\n').map((line, li) => {
     const isBullet = /^[\s]*[-*•]\s/.test(line)
     const content = isBullet ? line.replace(/^[\s]*[-*•]\s/, '') : line
-    const parts: React.ReactNode[] = []
-    const regex = /(\*\*(.+?)\*\*|`(.+?)`)/g
-    let last = 0
-    let match
-    while ((match = regex.exec(content)) !== null) {
-      if (match.index > last) parts.push(content.slice(last, match.index))
-      if (match[0].startsWith('**')) {
-        parts.push(<strong key={match.index}>{match[2]}</strong>)
-      } else {
-        parts.push(
-          <code key={match.index} style={{ backgroundColor: 'rgba(55,53,47,0.08)', borderRadius: 3, padding: '0 3px', fontFamily: 'monospace', fontSize: '0.9em' }}>
-            {match[3]}
-          </code>
-        )
-      }
-      last = match.index + match[0].length
-    }
-    if (last < content.length) parts.push(content.slice(last))
     return (
       <div key={li} style={isBullet ? { paddingLeft: 12, display: 'flex', gap: 4 } : {}}>
         {isBullet && <span style={{ opacity: 0.5, flexShrink: 0 }}>•</span>}
-        <span>{parts}</span>
+        <span>{renderInlineContent(content)}</span>
       </div>
     )
   })

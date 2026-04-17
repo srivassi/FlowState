@@ -59,6 +59,7 @@ function FlashcardsInner() {
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
+  const genAbortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }: { data: { session: any } }) => {
@@ -103,13 +104,14 @@ function FlashcardsInner() {
     if (!genTitle.trim() || !genFile || !userId || !selectedCourse) return
     setGenerating(true)
     setGenError('')
+    genAbortRef.current = new AbortController()
     try {
       const form = new FormData()
       form.append('file', genFile)
       form.append('user_id', userId)
       form.append('course_id', selectedCourse)
       form.append('title', genTitle.trim())
-      const res = await fetch(`${API_URL}/flashcards/generate`, { method: 'POST', body: form })
+      const res = await fetch(`${API_URL}/flashcards/generate`, { method: 'POST', body: form, signal: genAbortRef.current.signal })
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }))
         throw new Error(err.detail || 'Generation failed')
@@ -121,10 +123,22 @@ function FlashcardsInner() {
       setShowGenerate(false)
       router.push(`/flashcards/${data.set.id}`)
     } catch (e: any) {
+      if (e.name === 'AbortError') {
+        setGenError('')
+        setGenerating(false)
+        return
+      }
       setGenError(e.message)
     } finally {
       setGenerating(false)
+      genAbortRef.current = null
     }
+  }
+
+  const handleCancelGenerate = () => {
+    genAbortRef.current?.abort()
+    setGenerating(false)
+    setGenError('')
   }
 
   const handleDeleteSet = async (setId: string, e: React.MouseEvent) => {
@@ -233,9 +247,15 @@ function FlashcardsInner() {
                   style={{ backgroundColor: '#37352F' }}>
                   {generating ? 'Generating…' : 'Generate'}
                 </button>
-                <button onClick={() => setShowGenerate(false)} className="rounded px-3 py-1.5 text-sm" style={{ color: NOTION.muted }}>
-                  Cancel
-                </button>
+                {generating ? (
+                  <button onClick={handleCancelGenerate} className="rounded px-3 py-1.5 text-sm text-red-500 hover:text-red-700">
+                    ✕ Stop
+                  </button>
+                ) : (
+                  <button onClick={() => setShowGenerate(false)} className="rounded px-3 py-1.5 text-sm" style={{ color: NOTION.muted }}>
+                    Cancel
+                  </button>
+                )}
               </div>
             </div>
           )}

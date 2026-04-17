@@ -29,6 +29,8 @@ class StickyNote(BaseModel):
     messages: List[Dict[str, str]]
     parent_note_id: Optional[str] = None
     page_id: Optional[str] = None   # which whiteboard page this note belongs to
+    type: Optional[str] = 'ai'      # 'ai' = chat note, 'text' = plain text note
+    content: Optional[str] = None   # body text for text notes
 
 
 class PageData(BaseModel):
@@ -67,6 +69,33 @@ class ForkNote(BaseModel):
 
 # ─── PDF upload ──────────────────────────────────────────────
 
+def _extract_pdf_sections(content: bytes) -> list:
+    """Extract table of contents / outline from a PDF using pypdf."""
+    if not HAS_PYPDF:
+        return []
+    try:
+        reader = pypdf.PdfReader(io.BytesIO(content))
+
+        def walk(items, depth=0):
+            result = []
+            for item in items:
+                if isinstance(item, list):
+                    result.extend(walk(item, depth + 1))
+                elif hasattr(item, "title"):
+                    try:
+                        page_idx = reader.get_destination_page_number(item)
+                        title = str(item.title).strip()
+                        if title:
+                            result.append({"title": title, "page": page_idx + 1, "depth": depth})
+                    except Exception:
+                        pass
+            return result
+
+        return walk(reader.outline)
+    except Exception:
+        return []
+
+
 @router.post("/upload-pdf")
 def upload_pdf(
     file: UploadFile = File(...),
@@ -78,7 +107,26 @@ def upload_pdf(
     path = f"{user_id}/{course_id}/{file.filename}"
     supabase.storage.from_("whiteboards").upload(path, content, {"content-type": file.content_type or "application/pdf", "upsert": "true"})
     pdf_url = supabase.storage.from_("whiteboards").get_public_url(path)
-    return {"pdf_url": pdf_url, "pdf_name": file.filename}
+    sections = _extract_pdf_sections(content)
+    return {"pdf_url": pdf_url, "pdf_name": file.filename, "sections": sections}
+
+
+# ─── Extract sections from an existing PDF URL ───────────────
+
+class ExtractSectionsRequest(BaseModel):
+    pdf_url: str
+
+@router.post("/extract-sections")
+def extract_sections(body: ExtractSectionsRequest):
+    if not HAS_PYPDF:
+        return {"sections": []}
+    try:
+        import requests as _requests
+        r = _requests.get(body.pdf_url, timeout=20)
+        sections = _extract_pdf_sections(r.content)
+        return {"sections": sections}
+    except Exception:
+        return {"sections": []}
 
 
 # ─── Get whiteboard for a course ─────────────────────────────

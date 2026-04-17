@@ -64,4 +64,5 @@ export const api = {
   saveWhiteboard: (data) => req('/whiteboard/save', { method: 'POST', body: JSON.stringify(data) }),
   chatOnNote: (data) => req('/whiteboard/chat', { method: 'POST', body: JSON.stringify(data) }),
   forkNote: (data) => req('/whiteboard/fork', { method: 'POST', body: JSON.stringify(data) }),
+  extractSections: (pdfUrl) => req('/whiteboard/extract-sections', { method: 'POST', body: JSON.stringify({ pdf_url: pdfUrl }) }),
 }

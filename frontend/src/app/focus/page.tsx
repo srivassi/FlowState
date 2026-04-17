@@ -1018,18 +1018,55 @@ function CandleScene({ progress }: { progress: number }) {
 // MAIN PAGE
 // ═══════════════════════════════════════════════════════════════
 
+// ─── Break tips ───────────────────────────────────────────────
+const BREAK_TIPS = [
+  { icon: '🚶', text: 'Take a short walk — even just to another room' },
+  { icon: '💧', text: 'Grab some water or a light snack' },
+  { icon: '📵', text: "Don't open your phone — your brain needs real rest" },
+  { icon: '👁️', text: 'Look out a window for 20 seconds. Give your eyes a break.' },
+  { icon: '🧘', text: 'Take 5 deep breaths: in for 4 counts, out for 6' },
+  { icon: '🙆', text: 'Roll your shoulders and stretch your neck and back' },
+  { icon: '🎵', text: 'Hum or listen to one song with your eyes closed' },
+  { icon: '☀️', text: "Stand up, look away from the screen. You're doing great." },
+]
+
+type BlockTask = { id: string; title: string; duration: number; sessionId: string | null }
+type Phase = 'work' | 'break-confirm' | 'break' | 'longbreak' | 'done'
+
 function FocusInner() {
   const router = useRouter()
   const params = useSearchParams()
 
-  const taskTitle   = params.get('title')    || 'Focus session'
-  const sessionId   = params.get('sessionId')
-  const totalSeconds = parseInt(params.get('duration') || '25') * 60
+  const isBlock   = params.get('block') === 'true'
+  const taskTitle = params.get('title') || 'Focus session'
+  const sessionId = params.get('sessionId')
+  const initSecs  = parseInt(params.get('duration') || '25') * 60
 
-  const [timeLeft, setTimeLeft]     = useState(totalSeconds)
+  // ── Core timer state ──────────────────────────────────────────
+  const [totalSeconds, setTotalSeconds] = useState(initSecs)
+  const [timeLeft, setTimeLeft]     = useState(initSecs)
   const [running, setRunning]       = useState(false)
   const [done, setDone]             = useState(false)
   const [notes, setNotes]           = useState('')
+
+  // ── Study block state ─────────────────────────────────────────
+  const [blockTasks, setBlockTasks]     = useState<BlockTask[]>([])
+  const [blockIdx, setBlockIdx]         = useState(0)
+  const [blockUserId, setBlockUserId]   = useState('')
+  const [breakMins, setBreakMins]       = useState(5)
+  const [longBreakMins, setLongBreakMins] = useState(15)
+  const [longBreakEvery, setLongBreakEvery] = useState(4)
+  const [sessionsCompleted, setSessionsCompleted] = useState(0)
+  const [phase, setPhase]               = useState<Phase>('work')
+  const [breakLeft, setBreakLeft]       = useState(0)
+  const [breakTipIdx, setBreakTipIdx]   = useState(0)
+
+  // ── Second Brain ──────────────────────────────────────────────
+  const [brainDumps, setBrainDumps]   = useState<string[]>([])
+  const [brainInput, setBrainInput]   = useState('')
+  const [showBrain, setShowBrain]     = useState(false)
+
+  // ── UI state ──────────────────────────────────────────────────
   const [playlist, setPlaylist]     = useState('lofi')
   const [scene, setScene]           = useState('coffee')
   const [msgIdx, setMsgIdx]         = useState(0)
@@ -1045,8 +1082,9 @@ function FocusInner() {
     customUrls[p.id] ? { ...p, url: ytEmbedUrl(customUrls[p.id]) ?? p.url } : p
   )
 
-  const timerRef   = useRef<ReturnType<typeof setInterval> | null>(null)
-  const msgRef     = useRef<ReturnType<typeof setInterval> | null>(null)
+  const timerRef    = useRef<ReturnType<typeof setInterval> | null>(null)
+  const breakRef    = useRef<ReturnType<typeof setInterval> | null>(null)
+  const msgRef      = useRef<ReturnType<typeof setInterval> | null>(null)
   const controlsRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const progress = Math.round(((totalSeconds - timeLeft) / totalSeconds) * 100)
@@ -1054,12 +1092,43 @@ function FocusInner() {
   const seconds  = timeLeft % 60
   const theme    = SCENE_THEMES[scene] ?? SCENE_THEMES.coffee
 
-  // Timer
+  const currentBlockTask = isBlock && blockTasks.length > 0 ? blockTasks[blockIdx] : null
+  const displayTitle = currentBlockTask ? currentBlockTask.title : taskTitle
+
+  // ── Read study block from sessionStorage ──────────────────────
   useEffect(() => {
-    if (running && !done) {
+    if (!isBlock) return
+    try {
+      const raw = sessionStorage.getItem('studyBlock')
+      if (!raw) return
+      const data = JSON.parse(raw)
+      setBlockTasks(data.tasks || [])
+      setBreakMins(data.breakMinutes || 5)
+      setLongBreakMins(data.longBreakMinutes || 15)
+      setLongBreakEvery(data.longBreakInterval || 4)
+      setBlockUserId(data.userId || '')
+      if (data.tasks?.[0]) {
+        setTotalSeconds(data.tasks[0].duration * 60)
+        setTimeLeft(data.tasks[0].duration * 60)
+      }
+    } catch {}
+  }, [isBlock])
+
+  // ── Work timer ────────────────────────────────────────────────
+  useEffect(() => {
+    if (running && !done && phase === 'work') {
       timerRef.current = setInterval(() => {
         setTimeLeft(prev => {
-          if (prev <= 1) { clearInterval(timerRef.current!); setRunning(false); setDone(true); return 0 }
+          if (prev <= 1) {
+            clearInterval(timerRef.current!)
+            setRunning(false)
+            if (isBlock) {
+              setPhase('break-confirm')
+            } else {
+              setDone(true)
+            }
+            return 0
+          }
           return prev - 1
         })
       }, 1000)
@@ -1067,9 +1136,35 @@ function FocusInner() {
       if (timerRef.current) clearInterval(timerRef.current)
     }
     return () => { if (timerRef.current) clearInterval(timerRef.current) }
-  }, [running, done])
+  }, [running, done, phase, isBlock])
 
-  // Rotate messages every 8s with fade
+  // ── Break timer ───────────────────────────────────────────────
+  useEffect(() => {
+    if (phase === 'break' || phase === 'longbreak') {
+      if (breakLeft <= 0) return
+      breakRef.current = setInterval(() => {
+        setBreakLeft(prev => {
+          if (prev <= 1) {
+            clearInterval(breakRef.current!)
+            return 0
+          }
+          return prev - 1
+        })
+      }, 1000)
+    } else {
+      if (breakRef.current) clearInterval(breakRef.current)
+    }
+    return () => { if (breakRef.current) clearInterval(breakRef.current) }
+  }, [phase, breakLeft])
+
+  // ── Rotate break tips ─────────────────────────────────────────
+  useEffect(() => {
+    if (phase !== 'break' && phase !== 'longbreak') return
+    const t = setInterval(() => setBreakTipIdx(i => i + 1), 7000)
+    return () => clearInterval(t)
+  }, [phase])
+
+  // ── Rotate motivational messages ──────────────────────────────
   useEffect(() => {
     msgRef.current = setInterval(() => {
       setMsgVisible(false)
@@ -1078,7 +1173,7 @@ function FocusInner() {
     return () => { if (msgRef.current) clearInterval(msgRef.current) }
   }, [])
 
-  // Auto-hide controls after 4s
+  // ── Auto-hide controls ────────────────────────────────────────
   useEffect(() => {
     const reset = () => {
       setShowControls(true)
@@ -1090,6 +1185,7 @@ function FocusInner() {
     return () => { window.removeEventListener('mousemove', reset); window.removeEventListener('touchstart', reset) }
   }, [running])
 
+  // ── Handlers ──────────────────────────────────────────────────
   const saveCustomUrl = (id: string) => {
     const next = { ...customUrls, [id]: urlDraft }
     setCustomUrls(next)
@@ -1100,7 +1196,49 @@ function FocusInner() {
 
   const handleComplete = async () => {
     if (sessionId) await api.completePomodoro(sessionId, notes || undefined).catch(() => {})
+    sessionStorage.removeItem('studyBlock')
     router.push('/dashboard')
+  }
+
+  const advanceToNextTask = async () => {
+    const nextIdx = blockIdx + 1
+    if (nextIdx >= blockTasks.length) {
+      setPhase('done')
+      setDone(true)
+      sessionStorage.removeItem('studyBlock')
+      return
+    }
+    const nextTask = blockTasks[nextIdx]
+    try {
+      const session = await api.startPomodoro({ task_id: nextTask.id, user_id: blockUserId, duration_minutes: nextTask.duration })
+      setBlockTasks(prev => prev.map((t, i) => i === nextIdx ? { ...t, sessionId: session.id } : t))
+    } catch {}
+    setBlockIdx(nextIdx)
+    setTotalSeconds(nextTask.duration * 60)
+    setTimeLeft(nextTask.duration * 60)
+    setPhase('work')
+    setRunning(true)
+  }
+
+  const confirmBreak = async () => {
+    // Complete the finished work session
+    const curTask = blockTasks[blockIdx]
+    if (curTask?.sessionId) {
+      await api.completePomodoro(curTask.sessionId, undefined).catch(() => {})
+    }
+    const newCount = sessionsCompleted + 1
+    setSessionsCompleted(newCount)
+    const isLong = newCount % longBreakEvery === 0
+    setBreakLeft((isLong ? longBreakMins : breakMins) * 60)
+    setPhase(isLong ? 'longbreak' : 'break')
+  }
+
+  const skipBreak = () => advanceToNextTask()
+
+  const saveBrainDump = () => {
+    if (!brainInput.trim()) return
+    setBrainDumps(prev => [...prev, brainInput.trim()])
+    setBrainInput('')
   }
 
   const selectedPlaylist = PLAYLISTS.find(p => p.id === playlist)!
@@ -1137,6 +1275,119 @@ function FocusInner() {
         backgroundImage: 'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 200 200\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'n\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.85\' numOctaves=\'4\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23n)\' opacity=\'0.04\'/%3E%3C/svg%3E")',
       }} />
 
+      {/* ── Break confirm overlay ── */}
+      {phase === 'break-confirm' && isBlock && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-5 px-4"
+          style={{ background: 'rgba(8,6,18,0.96)', backdropFilter: 'blur(12px)' }}>
+          <div className="text-5xl" style={{ animation: 'bdoneIn 0.6s cubic-bezier(0.34,1.56,0.64,1)' }}>✅</div>
+          <div className="text-2xl font-bold text-white">Session {blockIdx + 1} done!</div>
+          <div className="text-sm" style={{ color: 'rgba(255,255,255,0.45)' }}>
+            {blockIdx + 1} of {blockTasks.length} complete
+            {blockIdx + 1 < blockTasks.length && (
+              <span> · next: <span style={{ color: 'rgba(255,255,255,0.7)' }}>{blockTasks[blockIdx + 1].title}</span></span>
+            )}
+          </div>
+          <div className="flex gap-3">
+            <button onClick={confirmBreak}
+              className="rounded-xl px-6 py-3 text-sm font-semibold text-white transition hover:opacity-90"
+              style={{ background: `linear-gradient(135deg,#4ade80,#16a34a)` }}>
+              Take a {breakMins}min break 🧘
+            </button>
+            {blockIdx + 1 < blockTasks.length && (
+              <button onClick={skipBreak}
+                className="rounded-xl px-5 py-3 text-sm font-semibold transition hover:opacity-80"
+                style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.6)', border: '1px solid rgba(255,255,255,0.1)' }}>
+                Skip break →
+              </button>
+            )}
+          </div>
+          {/* Brain dump on confirm screen */}
+          <div className="w-80 mt-2">
+            <div className="mb-1.5 text-xs font-medium" style={{ color: 'rgba(255,255,255,0.3)' }}>💭 Capture a thought before you go</div>
+            <div className="flex gap-2">
+              <input value={brainInput} onChange={e => setBrainInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && saveBrainDump()}
+                placeholder="Random thought, reminder, idea…"
+                className="flex-1 rounded-lg px-3 py-2 text-sm text-white placeholder-white/20 outline-none"
+                style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)' }} />
+              <button onClick={saveBrainDump}
+                className="rounded-lg px-3 text-sm text-white transition hover:opacity-80"
+                style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.1)' }}>+</button>
+            </div>
+            {brainDumps.length > 0 && (
+              <div className="mt-2 space-y-1 max-h-20 overflow-y-auto">
+                {brainDumps.map((d, i) => (
+                  <div key={i} className="text-xs px-2 py-1 rounded" style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.5)' }}>• {d}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Break / Long break overlay ── */}
+      {(phase === 'break' || phase === 'longbreak') && isBlock && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-5 px-4"
+          style={{ background: 'linear-gradient(160deg,#051a0a 0%,#0d1f0d 50%,#030e07 100%)' }}>
+
+          <div className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'rgba(255,255,255,0.25)' }}>
+            {phase === 'longbreak' ? `Long Break · Session ${blockIdx + 1} of ${blockTasks.length}` : `Short Break · Session ${blockIdx + 1} of ${blockTasks.length}`}
+          </div>
+
+          {/* Break countdown ring */}
+          <div className="relative flex items-center justify-center" style={{ width: 150, height: 150 }}>
+            <svg width="150" height="150" style={{ position: 'absolute', transform: 'rotate(-90deg)' }}>
+              <circle cx="75" cy="75" r="65" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="6" />
+              <circle cx="75" cy="75" r="65" fill="none" stroke="#4ade80" strokeWidth="6" strokeLinecap="round"
+                strokeDasharray={`${2 * Math.PI * 65}`}
+                strokeDashoffset={`${2 * Math.PI * 65 * (breakLeft / ((phase === 'longbreak' ? longBreakMins : breakMins) * 60))}`}
+                style={{ transition: 'stroke-dashoffset 1s linear' }} />
+            </svg>
+            <div className="text-center">
+              <div className="text-3xl font-bold tabular-nums" style={{ color: '#4ade80' }}>
+                {String(Math.floor(breakLeft / 60)).padStart(2,'0')}:{String(breakLeft % 60).padStart(2,'0')}
+              </div>
+              <div className="mt-1 text-xs" style={{ color: 'rgba(255,255,255,0.25)' }}>remaining</div>
+            </div>
+          </div>
+
+          {/* Rotating tip */}
+          <div className="max-w-xs rounded-2xl px-6 py-4 text-center"
+            style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
+            <div className="mb-2 text-3xl">{BREAK_TIPS[breakTipIdx % BREAK_TIPS.length].icon}</div>
+            <div className="text-sm leading-relaxed" style={{ color: 'rgba(255,255,255,0.65)' }}>
+              {BREAK_TIPS[breakTipIdx % BREAK_TIPS.length].text}
+            </div>
+          </div>
+
+          {/* Long break: show brain dumps */}
+          {phase === 'longbreak' && brainDumps.length > 0 && (
+            <div className="w-80">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wider" style={{ color: 'rgba(74,222,128,0.5)' }}>
+                💭 Thoughts from your session
+              </div>
+              <div className="space-y-1.5 max-h-28 overflow-y-auto">
+                {brainDumps.map((d, i) => (
+                  <div key={i} className="rounded-lg px-3 py-2 text-sm"
+                    style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.75)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                    {d}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Skip / next */}
+          <button onClick={breakLeft === 0 ? advanceToNextTask : skipBreak}
+            className="rounded-xl px-6 py-2.5 text-sm font-medium transition hover:opacity-80"
+            style={{ background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.5)', border: '1px solid rgba(255,255,255,0.08)' }}>
+            {blockIdx + 1 < blockTasks.length
+              ? breakLeft === 0 ? `Start Session ${blockIdx + 2} →` : `Skip to Session ${blockIdx + 2} →`
+              : 'Finish block →'}
+          </button>
+        </div>
+      )}
+
       {/* Done screen */}
       {done && (
         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center"
@@ -1162,11 +1413,21 @@ function FocusInner() {
       {/* Top bar */}
       <div className="relative z-10 flex items-center justify-between px-6 py-4"
         style={{ opacity: showControls ? 1 : 0, transition: 'opacity 0.5s ease' }}>
-        <button onClick={() => router.push('/dashboard')}
+        <button onClick={() => { sessionStorage.removeItem('studyBlock'); router.push('/dashboard') }}
           className="text-sm transition hover:opacity-80"
           style={{ color: 'rgba(255,255,255,0.35)' }}>← Back</button>
-        <div className="truncate max-w-xs text-sm font-medium" style={{ color: 'rgba(255,255,255,0.55)' }}>
-          {taskTitle}
+        <div className="flex flex-col items-center gap-0.5">
+          <div className="truncate max-w-xs text-sm font-medium" style={{ color: 'rgba(255,255,255,0.55)' }}>
+            {displayTitle}
+          </div>
+          {isBlock && blockTasks.length > 1 && (
+            <div className="flex gap-1">
+              {blockTasks.map((_, i) => (
+                <div key={i} className="h-1 w-4 rounded-full transition-colors"
+                  style={{ backgroundColor: i < blockIdx ? 'rgba(74,222,128,0.7)' : i === blockIdx ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.2)' }} />
+              ))}
+            </div>
+          )}
         </div>
         <div style={{ width: 48 }} />
       </div>
@@ -1222,6 +1483,48 @@ function FocusInner() {
         {/* Ambient scene */}
         <div className="w-full max-w-xs">{renderScene()}</div>
       </div>
+
+      {/* ── Second Brain (block work phase only) ── */}
+      {isBlock && phase === 'work' && (
+        <div className="absolute bottom-28 right-5 z-20">
+          {showBrain ? (
+            <div className="rounded-2xl p-3" style={{ background: 'rgba(15,15,25,0.92)', border: '1px solid rgba(255,255,255,0.12)', width: 260, backdropFilter: 'blur(12px)' }}>
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-xs font-semibold" style={{ color: 'rgba(255,255,255,0.35)' }}>💭 SECOND BRAIN</span>
+                <button onClick={() => setShowBrain(false)} className="text-xs" style={{ color: 'rgba(255,255,255,0.2)' }}>✕</button>
+              </div>
+              {brainDumps.length > 0 && (
+                <div className="mb-2 space-y-1 max-h-24 overflow-y-auto">
+                  {brainDumps.map((d, i) => (
+                    <div key={i} className="text-xs px-2 py-1 rounded" style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.55)' }}>• {d}</div>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-1.5">
+                <input value={brainInput} onChange={e => setBrainInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') saveBrainDump(); if (e.key === 'Escape') setShowBrain(false) }}
+                  autoFocus placeholder="Thought, reminder, idea…"
+                  className="flex-1 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-white/20 outline-none"
+                  style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.1)' }} />
+                <button onClick={saveBrainDump}
+                  className="rounded-lg px-2.5 text-xs text-white transition hover:opacity-80"
+                  style={{ background: 'rgba(255,255,255,0.1)' }}>Save</button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={() => setShowBrain(true)}
+              title="Capture a thought"
+              className="relative flex h-11 w-11 items-center justify-center rounded-full text-xl transition hover:scale-105 active:scale-95"
+              style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)' }}>
+              💭
+              {brainDumps.length > 0 && (
+                <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full text-xs font-bold"
+                  style={{ background: '#4ade80', color: '#000' }}>{brainDumps.length}</span>
+              )}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Bottom controls */}
       <div className="relative z-10 px-6 py-5"

@@ -17,6 +17,41 @@ from typing import List, Optional
 router = APIRouter(prefix="/study")
 
 
+def _extract_json(raw: str) -> dict:
+    """
+    Robustly extract a JSON object from Claude's response.
+    Handles markdown fences, leading/trailing prose, and minor structural errors.
+    """
+    # 1. Strip markdown code fences
+    cleaned = re.sub(r'```(?:json)?\s*', '', raw).strip()
+
+    # 2. Try direct parse first
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        pass
+
+    # 3. Extract the outermost {...} block and try again
+    obj_match = re.search(r'\{[\s\S]*\}', cleaned)
+    if obj_match:
+        try:
+            return json.loads(obj_match.group(0))
+        except json.JSONDecodeError:
+            pass
+
+    # 4. Last resort: try progressively shorter substrings (truncation recovery)
+    if obj_match:
+        candidate = obj_match.group(0)
+        # Walk back from the end, closing any open structures
+        for trim in range(0, min(500, len(candidate)), 10):
+            try:
+                return json.loads(candidate[:len(candidate) - trim])
+            except json.JSONDecodeError:
+                continue
+
+    return {}
+
+
 class PomodoroStart(BaseModel):
     task_id: str
     user_id: str
@@ -425,13 +460,12 @@ def reschedule_preview(body: FullRescheduleRequest):
         prompt = _build_claude_prompt(ctx, body.feedback or "", body.interleave_courses)
         msg = client.messages.create(
             model="claude-opus-4-6",
-            max_tokens=4000,
+            max_tokens=8000,
             messages=[{"role": "user", "content": prompt}],
         )
         raw = msg.content[0].text.strip()
-        obj_match = re.search(r'\{[\s\S]*\}', raw)
-        if obj_match:
-            directives = json.loads(obj_match.group(0))
+        directives = _extract_json(raw)
+        if directives:
             summary = directives.get("summary", "Schedule will be updated based on your exam deadlines.")
             return {
                 "summary": summary,
@@ -476,9 +510,7 @@ def full_reschedule(body: FullRescheduleRequest):
                 messages=[{"role": "user", "content": prompt}],
             )
             raw = msg.content[0].text.strip()
-            obj_match = re.search(r'\{[\s\S]*\}', raw)
-            if obj_match:
-                directives = json.loads(obj_match.group(0))
+            directives = _extract_json(raw) or directives
         except Exception as e:
             traceback.print_exc()
             # Non-fatal — schedule with defaults

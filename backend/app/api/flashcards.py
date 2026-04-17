@@ -29,6 +29,7 @@ class FlashcardCreate(BaseModel):
 class FlashcardUpdate(BaseModel):
     question: Optional[str] = None
     answer: Optional[str] = None
+    status: Optional[str] = None   # 'new' | 'review' | 'mastered'
 
 
 class SetCreate(BaseModel):
@@ -102,6 +103,7 @@ def add_card(body: FlashcardCreate):
             "question": body.question,
             "answer": body.answer,
             "order_index": body.order_index,
+            "status": "new",
         })
         .execute()
     )

@@ -83,9 +83,10 @@ def update_profile(user_id: str, body: UpdateProfile):
     updates = {k: v for k, v in body.dict().items() if v is not None}
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
-    result = supabase.table("user_profiles").update(updates).eq("id", user_id).execute()
+    updates["id"] = user_id
+    result = supabase.table("user_profiles").upsert(updates).execute()
     if not result.data:
-        raise HTTPException(status_code=404, detail="Profile not found")
+        raise HTTPException(status_code=400, detail="Failed to save profile")
     return result.data[0]
 
 

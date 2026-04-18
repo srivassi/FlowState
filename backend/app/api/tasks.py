@@ -83,6 +83,7 @@ def update_task_status(task_id: str, body: TaskStatusUpdate):
     if body.status == "done":
         from datetime import datetime
         update["completed_at"] = datetime.utcnow().isoformat()
+        update["scheduled_date"] = date.today().isoformat()
     result = supabase.table("tasks").update(update).eq("id", task_id).execute()
     if not result.data:
         raise HTTPException(status_code=404, detail="Task not found")

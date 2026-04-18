@@ -137,6 +137,7 @@ def generate_flashcards(
     user_id: str = Form(...),
     course_id: str = Form(...),
     title: str = Form(...),
+    instructions: str = Form(default=''),
 ):
     """Upload a PDF and generate flashcards from it using Claude."""
     api_key = os.getenv("ANTHROPIC_API_KEY")
@@ -163,12 +164,17 @@ def generate_flashcards(
     # Generate flashcards with Claude
     client = anthropic.Anthropic(api_key=api_key)
 
+    instruction_block = (
+        f"\nSTUDENT INSTRUCTIONS: {instructions.strip()}\nFollow these instructions carefully when deciding what to include and how to phrase each card.\n"
+        if instructions.strip() else
+        "\nDefault style: one clear concept per card, keep answers concise (1-3 sentences max).\n"
+    )
     prompt = (
-        "You are a study assistant. Given the following course material, generate a comprehensive "
-        "set of flashcards that cover the key concepts, definitions, facts, and relationships.\n\n"
-        "Return ONLY a JSON array (no markdown, no extra text) where each element has:\n"
+        "You are a study assistant. Given the following course material, generate a set of flashcards.\n"
+        + instruction_block +
+        "\nReturn ONLY a JSON array (no markdown, no extra text) where each element has:\n"
         '  { "question": "...", "answer": "..." }\n\n'
-        "Aim for 10-20 high-quality cards. Questions should test understanding, not just recall.\n\n"
+        "Aim for 10-20 cards. Questions should test understanding, not just recall.\n\n"
         f"Course material:\n{pdf_text}"
     )
 

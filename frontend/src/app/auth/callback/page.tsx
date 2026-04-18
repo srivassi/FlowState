@@ -10,14 +10,26 @@ export default function AuthCallback() {
   const router = useRouter()
 
   useEffect(() => {
+    async function redirect(session: any) {
+      try {
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/onboarding/profile/${session.user.id}`)
+        if (res.ok) {
+          router.replace('/dashboard')
+        } else {
+          router.replace('/onboarding')
+        }
+      } catch {
+        router.replace('/onboarding')
+      }
+    }
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
-        router.replace('/dashboard')
+        redirect(session)
       } else {
-        // Exchange the token from the URL hash
         supabase.auth.onAuthStateChange((event, session) => {
           if (event === 'SIGNED_IN' && session) {
-            router.replace('/dashboard')
+            redirect(session)
           }
         })
       }

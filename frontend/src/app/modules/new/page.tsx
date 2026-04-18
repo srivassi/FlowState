@@ -32,6 +32,7 @@ export default function NewModule() {
   const [userId, setUserId] = useState<string | null>(null)
   const [profile, setProfile] = useState<any>(null)
   const [saving, setSaving] = useState(false)
+  const [loadingStep, setLoadingStep] = useState('')
 
   const [name, setName] = useState('')
   const [examDate, setExamDate] = useState('')
@@ -53,6 +54,7 @@ export default function NewModule() {
     if (!userId || !name || !examDate) return
     setSaving(true)
     try {
+      setLoadingStep('Creating module…')
       const created = await api.createCourse({
         user_id: userId,
         name: `${emoji} ${name}`,
@@ -64,6 +66,10 @@ export default function NewModule() {
         const pomodoroMinutes = profile?.pomodoro_work_minutes || 25
         const pomodoroBreak   = profile?.pomodoro_break_minutes || 5
         const dailyHours      = profile?.daily_study_hours || 4
+
+        setLoadingStep('Analysing your syllabus…')
+        await new Promise(r => setTimeout(r, 600))
+        setLoadingStep('Generating your study schedule with Claude…')
 
         await api.generatePlan({
           syllabus,
@@ -87,6 +93,7 @@ export default function NewModule() {
             past_papers_urls: [],
           },
         })
+        setLoadingStep('Done! Heading to dashboard…')
       }
 
       router.push('/dashboard')
@@ -95,6 +102,7 @@ export default function NewModule() {
       alert('Something went wrong — check the console.')
     } finally {
       setSaving(false)
+      setLoadingStep('')
     }
   }
 
@@ -196,9 +204,19 @@ export default function NewModule() {
 
         <button onClick={handleSave} disabled={saving || !name || !examDate}
           className="w-full rounded-xl bg-blue-600 py-3 font-semibold text-white shadow-lg transition hover:bg-blue-700 disabled:opacity-50">
-          {saving ? 'Generating schedule...' : 'Add module →'}
+          {saving ? loadingStep || 'Working…' : 'Add module →'}
         </button>
       </div>
+
+      {/* Full-screen loading overlay */}
+      {saving && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-5"
+          style={{ backgroundColor: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(4px)' }}>
+          <div className="h-10 w-10 animate-spin rounded-full border-4 border-gray-200 border-t-blue-600" />
+          <p className="text-sm font-medium text-gray-700">{loadingStep || 'Working…'}</p>
+          <p className="text-xs text-gray-400">This can take up to 30 seconds</p>
+        </div>
+      )}
     </div>
   )
 }

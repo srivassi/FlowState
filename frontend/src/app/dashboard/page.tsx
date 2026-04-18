@@ -157,6 +157,7 @@ export default function Dashboard() {
         api.getCourses(uid).catch(() => []),
         api.getProfile(uid).catch(() => null),
       ])
+      if (!profileData) { router.replace('/onboarding'); return }
       setTodayTasks(plan.tasks || [])
       setStats(statsData)
       setCourses(coursesData)

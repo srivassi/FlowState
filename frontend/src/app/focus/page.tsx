@@ -1226,6 +1226,11 @@ function FocusInner() {
     if (curTask?.sessionId) {
       await api.completePomodoro(curTask.sessionId, undefined).catch(() => {})
     }
+    // Last task — end the block, no break
+    if (blockIdx + 1 >= blockTasks.length) {
+      advanceToNextTask()
+      return
+    }
     const newCount = sessionsCompleted + 1
     setSessionsCompleted(newCount)
     const isLong = newCount % longBreakEvery === 0
@@ -1291,7 +1296,7 @@ function FocusInner() {
             <button onClick={confirmBreak}
               className="rounded-xl px-6 py-3 text-sm font-semibold text-white transition hover:opacity-90"
               style={{ background: `linear-gradient(135deg,#4ade80,#16a34a)` }}>
-              Take a {breakMins}min break 🧘
+              {blockIdx + 1 >= blockTasks.length ? 'Finish block 🎉' : `Take a ${breakMins}min break 🧘`}
             </button>
             {blockIdx + 1 < blockTasks.length && (
               <button onClick={skipBreak}
@@ -1397,6 +1402,19 @@ function FocusInner() {
           <div className="mb-8 text-sm" style={{ color: 'rgba(255,255,255,0.45)' }}>
             {Math.round(totalSeconds / 60)} minutes of deep work. Well done.
           </div>
+          {brainDumps.length > 0 && (
+            <div className="mb-4 w-80">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.3)' }}>💭 Second brain</div>
+              <div className="space-y-1.5 max-h-28 overflow-y-auto">
+                {brainDumps.map((d, i) => (
+                  <div key={i} className="rounded-lg px-3 py-2 text-sm"
+                    style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.7)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                    {d}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <textarea placeholder="Any notes? What did you cover?" value={notes}
             onChange={e => setNotes(e.target.value)} rows={3}
             className="mb-6 w-80 resize-none rounded-xl px-4 py-3 text-sm text-white placeholder-white/30 outline-none"
@@ -1484,8 +1502,8 @@ function FocusInner() {
         <div className="w-full max-w-xs">{renderScene()}</div>
       </div>
 
-      {/* ── Second Brain (block work phase only) ── */}
-      {isBlock && phase === 'work' && (
+      {/* ── Second Brain ── */}
+      {phase === 'work' && (
         <div className="absolute bottom-28 right-5 z-20">
           {showBrain ? (
             <div className="rounded-2xl p-3" style={{ background: 'rgba(15,15,25,0.92)', border: '1px solid rgba(255,255,255,0.12)', width: 260, backdropFilter: 'blur(12px)' }}>

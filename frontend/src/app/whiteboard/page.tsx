@@ -526,6 +526,35 @@ function WhiteboardInner() {
     updateNotes(updated)
   }
 
+  const pageNotes = notes.filter(n => n.page_id === activePageId)
+  const allMinimised = pageNotes.length > 0 && pageNotes.every(n => n.minimised)
+
+  const toggleMinimiseAll = () => {
+    const next = !allMinimised
+    updateNotes(notes.map(n => n.page_id === activePageId ? { ...n, minimised: next } : n))
+  }
+
+  const tidyNotes = () => {
+    const COLS = 2, NOTE_W = 320, NOTE_H = 38, GAP = 10, START_X = 20, START_Y = 20
+    const updated = notes.map((n) => {
+      if (n.page_id !== activePageId) return n
+      const pageIdx = pageNotes.findIndex(p => p.id === n.id)
+      const col = pageIdx % COLS, row = Math.floor(pageIdx / COLS)
+      return { ...n, minimised: true, x: START_X + col * (NOTE_W + GAP), y: START_Y + row * (NOTE_H + GAP) }
+    })
+    updateNotes(updated)
+  }
+
+  const restoreNote = (noteId: string) => {
+    const updated = notes.map(n => n.id === noteId ? { ...n, minimised: false } : n)
+    updateNotes(updated)
+    setActiveNote(noteId)
+    setTimeout(() => {
+      const el = document.getElementById(`note-${noteId}`)
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 50)
+  }
+
   const pdfUrl = activePage?.pdf_url || null
 
   return (
@@ -738,6 +767,52 @@ function WhiteboardInner() {
               </div>
             )}
 
+            {/* Notes panel for active page */}
+            {pageNotes.length > 0 && (
+              <div style={{ borderTop: '1px solid #EDEDED' }}>
+                <div className="flex items-center justify-between px-4 py-2" style={{ minWidth: 220 }}>
+                  <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'rgba(55,53,47,0.4)' }}>
+                    Notes ({pageNotes.length})
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={tidyNotes}
+                      className="rounded px-1.5 py-0.5 text-xs transition hover:bg-[#EFEFED]"
+                      style={{ color: 'rgba(55,53,47,0.5)' }}
+                      title="Tidy notes into a grid">
+                      ⊞
+                    </button>
+                    <button
+                      onClick={toggleMinimiseAll}
+                      className="rounded px-1.5 py-0.5 text-xs transition hover:bg-[#EFEFED]"
+                      style={{ color: 'rgba(55,53,47,0.5)' }}
+                      title={allMinimised ? 'Expand all' : 'Minimise all'}>
+                      {allMinimised ? '▼' : '▲'}
+                    </button>
+                  </div>
+                </div>
+                <div className="overflow-y-auto" style={{ maxHeight: 200, minWidth: 220 }}>
+                  {pageNotes.map(note => (
+                    <button
+                      key={note.id}
+                      onClick={() => note.minimised ? restoreNote(note.id) : (() => { setActiveNote(note.id); document.getElementById(`note-${note.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }) })()}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-[#EFEFED]"
+                      style={{ color: note.minimised ? '#37352F' : 'rgba(55,53,47,0.6)' }}
+                      title={note.minimised ? 'Click to restore' : 'Click to focus'}>
+                      <span className="shrink-0 text-xs">{note.type === 'text' ? '📝' : '💬'}</span>
+                      <span className="flex-1 truncate">{note.title || (note.type === 'text' ? 'Untitled note' : 'Note')}</span>
+                      {note.minimised && (
+                        <span className="shrink-0 rounded-full px-1.5 py-0.5 text-xs font-medium"
+                          style={{ backgroundColor: '#EEF2FF', color: '#6366F1', fontSize: 9 }}>
+                          min
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="p-2" style={{ borderTop: '1px solid #EDEDED' }}>
               <button
                 onClick={addPage}
@@ -839,9 +914,9 @@ function WhiteboardInner() {
               {/* Notes overlay */}
               <div className="absolute inset-0 pointer-events-none">
                 {activeNotes.map(note => (
-                  <div key={note.id}
+                  <div key={note.id} id={`note-${note.id}`}
                     className="absolute select-none pointer-events-auto"
-                    style={{ left: note.x, top: note.y, width: note.width, zIndex: activeNote === note.id ? 100 : 10 }}
+                    style={{ left: note.x, top: note.y, minWidth: 260, maxWidth: 460, zIndex: activeNote === note.id ? 100 : 10 }}
                     onClick={() => setActiveNote(note.id)}
                   >
                     {/* Note header */}
@@ -947,7 +1022,7 @@ function WhiteboardInner() {
                             )}
                             {note.messages.map((m, i) => (
                               <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                <div className="max-w-[85%] rounded-lg px-2.5 py-1.5 text-xs leading-relaxed"
+                                <div className="max-w-[90%] rounded-lg px-2.5 py-1.5 text-xs leading-relaxed"
                                   style={m.role === 'user'
                                     ? { backgroundColor: '#37352F', color: '#FFFFFF' }
                                     : { backgroundColor: 'rgba(255,255,255,0.8)', color: '#37352F', border: '1px solid rgba(55,53,47,0.1)' }}>

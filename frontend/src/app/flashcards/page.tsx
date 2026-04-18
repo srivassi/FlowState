@@ -56,6 +56,7 @@ function FlashcardsInner() {
   const [showGenerate, setShowGenerate] = useState(false)
   const [genTitle, setGenTitle] = useState('')
   const [genFile, setGenFile] = useState<File | null>(null)
+  const [genInstructions, setGenInstructions] = useState('')
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
@@ -111,6 +112,7 @@ function FlashcardsInner() {
       form.append('user_id', userId)
       form.append('course_id', selectedCourse)
       form.append('title', genTitle.trim())
+      if (genInstructions.trim()) form.append('instructions', genInstructions.trim())
       const res = await fetch(`${API_URL}/flashcards/generate`, { method: 'POST', body: form, signal: genAbortRef.current.signal })
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }))
@@ -161,15 +163,14 @@ function FlashcardsInner() {
   return (
     <div className="flex h-screen" style={{ fontFamily: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", backgroundColor: NOTION.bg }}>
 
-      {/* Sidebar */}
-      <div className="flex w-56 shrink-0 flex-col overflow-y-auto border-r" style={{ backgroundColor: NOTION.sidebar, borderColor: NOTION.border }}>
+      {/* Sidebar — desktop only */}
+      <div className="hidden md:flex w-56 shrink-0 flex-col overflow-y-auto border-r" style={{ backgroundColor: NOTION.sidebar, borderColor: NOTION.border }}>
         <div className="p-3">
           <Link href="/dashboard"
             className="mb-4 flex items-center gap-2 rounded px-2 py-2 text-sm font-semibold transition-colors hover:bg-[#EFEFED]"
             style={{ color: NOTION.text }}>
             ← Dashboard
           </Link>
-
           <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wider" style={{ color: NOTION.muted }}>Modules</div>
           <div className="space-y-0.5">
             {courses.map(c => (
@@ -189,12 +190,22 @@ function FlashcardsInner() {
 
       {/* Main */}
       <div className="flex flex-1 flex-col overflow-y-auto">
-        <div className="mx-auto w-full max-w-3xl px-8 py-10">
+        {/* Mobile top bar */}
+        <div className="flex items-center gap-3 border-b px-4 py-3 md:hidden" style={{ borderColor: NOTION.border, backgroundColor: NOTION.sidebar }}>
+          <Link href="/dashboard" className="text-sm shrink-0" style={{ color: NOTION.muted }}>← Back</Link>
+          <select value={selectedCourse} onChange={e => setSelectedCourse(e.target.value)}
+            className="flex-1 rounded border px-2 py-1.5 text-sm focus:outline-none"
+            style={{ borderColor: NOTION.border, color: NOTION.text, backgroundColor: NOTION.bg }}>
+            {courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+
+        <div className="mx-auto w-full max-w-3xl px-4 py-6 md:px-8 md:py-10">
 
           {/* Header */}
-          <div className="mb-8 flex items-center justify-between">
+          <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h1 className="text-2xl font-bold" style={{ color: NOTION.text }}>Flashcards</h1>
+              <h1 className="text-xl font-bold md:text-2xl" style={{ color: NOTION.text }}>Flashcards</h1>
               {currentCourse && (
                 <div className="mt-1 flex items-center gap-2 text-sm" style={{ color: NOTION.muted }}>
                   <div className="h-2 w-2 rounded-full" style={{ backgroundColor: currentCourse.color }} />
@@ -202,7 +213,7 @@ function FlashcardsInner() {
                 </div>
               )}
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => { setShowGenerate(true); setShowCreate(false) }}
                 className="flex items-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium transition-colors"
@@ -238,6 +249,14 @@ function FlashcardsInner() {
                 <input ref={fileRef} type="file" accept=".pdf" className="hidden"
                   onChange={e => setGenFile(e.target.files?.[0] || null)} />
               </div>
+              <textarea
+                rows={2}
+                placeholder="Parsing instructions (optional) — e.g. one concept per card, focus on definitions only, keep answers under 2 sentences…"
+                value={genInstructions}
+                onChange={e => setGenInstructions(e.target.value)}
+                className="mb-3 w-full resize-none rounded border px-3 py-2 text-sm outline-none"
+                style={{ borderColor: NOTION.border, color: NOTION.text }}
+              />
               {genError && <div className="mb-3 text-sm text-red-500">{genError}</div>}
               <div className="flex gap-2">
                 <button
@@ -326,19 +345,19 @@ function FlashcardsInner() {
                         sessionStorage.setItem('gauntletPdf', JSON.stringify({ pdfUrl: first.pdf_url, pdfName: first.pdf_name || first.name, courseId: set.course_id, userId }))
                         router.push('/games/gauntlet')
                       }}
-                      className="hidden rounded px-2 py-1 text-xs transition-colors group-hover:block"
+                      className="rounded px-2 py-1 text-xs transition-colors opacity-0 group-hover:opacity-100 md:block"
                       style={{ border: `1px solid ${NOTION.btnBorder}`, color: '#6366F1', backgroundColor: NOTION.btn }}>
                       ⚔️ Gauntlet
                     </button>
                     <button
                       onClick={e => { e.stopPropagation(); router.push(`/flashcards/${set.id}/jeopardy`) }}
-                      className="hidden rounded px-2 py-1 text-xs transition-colors group-hover:block"
+                      className="rounded px-2 py-1 text-xs transition-colors opacity-0 group-hover:opacity-100 md:block"
                       style={{ border: `1px solid ${NOTION.btnBorder}`, color: NOTION.text, backgroundColor: NOTION.btn }}>
                       🏆 Jeopardy
                     </button>
                     <button
                       onClick={e => handleDeleteSet(set.id, e)}
-                      className="hidden rounded p-1 text-xs text-red-400 transition-colors group-hover:block hover:text-red-600">
+                      className="rounded p-1 text-xs text-red-400 transition-colors opacity-0 group-hover:opacity-100 md:block hover:text-red-600">
                       ✕
                     </button>
                   </div>

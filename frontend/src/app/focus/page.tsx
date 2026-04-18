@@ -13,8 +13,8 @@ const DEFAULT_PLAYLISTS = [
   { id: 'rain',   label: 'Rain & thunder',   icon: '🌧️', url: 'https://www.youtube.com/embed/mPZkdNFkNps?autoplay=1&controls=0&loop=1&playlist=mPZkdNFkNps' },
   { id: 'jazz',   label: 'Jazz coffee',      icon: '☕', url: 'https://www.youtube.com/embed/VMAPTo7RVCo?autoplay=1&controls=0&loop=1&playlist=VMAPTo7RVCo' },
   { id: 'nature', label: 'Forest sounds',    icon: '🌿', url: 'https://www.youtube.com/embed/xNN7iTA57jM?autoplay=1&controls=0&loop=1&playlist=xNN7iTA57jM' },
-  { id: 'space',  label: 'Space ambience',   icon: '🚀', url: 'https://www.youtube.com/embed/ZB4bKBKQ2Yg?autoplay=1&controls=0&loop=1&playlist=ZB4bKBKQ2Yg' },
-  { id: 'sitar',  label: 'Indian Classical', icon: '🪕', url: null },
+  { id: 'game',   label: 'Game music',       icon: '🎮', url: 'https://www.youtube.com/embed/VNAxq__7N2I?autoplay=1&controls=0' },
+  { id: 'sitar',  label: 'Indian Classical', icon: '🪕', url: 'https://www.youtube.com/embed/LnZzZMSM4-4?autoplay=1&controls=0&start=6' },
 ]
 
 function ytEmbedUrl(raw: string): string | null {
@@ -133,11 +133,11 @@ function CoffeeScene({ progress }: { progress: number }) {
       {/* ── STAGE 2: Steam ── */}
       <div style={{ position: 'absolute', inset: 0, opacity: stage === 'steam' ? 1 : 0, transition: 'opacity 1s ease', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', paddingBottom: 14 }}>
         <div style={{ position: 'relative' }}>
-          {/* Steam wand */}
-          <div style={{ position: 'absolute', left: -10, bottom: 52, width: 7, height: 68, background: 'linear-gradient(90deg,#aaa,#d0d0d0,#aaa)', borderRadius: 3, boxShadow: '0 2px 8px rgba(0,0,0,0.3)' }}>
-            <div style={{ position: 'absolute', bottom: -5, left: -3, width: 13, height: 8, borderRadius: 4, background: '#999' }} />
+          {/* Steam wand — enters jug from right side */}
+          <div style={{ position: 'absolute', right: 8, bottom: 38, width: 6, height: 70, background: 'linear-gradient(90deg,#a0a0a0,#d8d8d8,#a8a8a8)', borderRadius: 3, boxShadow: '0 2px 8px rgba(0,0,0,0.3)', transform: 'rotate(-10deg)', transformOrigin: 'bottom center', zIndex: 2 }}>
+            <div style={{ position: 'absolute', bottom: -4, left: -3, width: 12, height: 7, borderRadius: 4, background: '#999' }} />
             {sp > 0.08 && [0,1,2].map(i => (
-              <div key={i} style={{ position: 'absolute', bottom: 4, left: 2, width: 2, height: 20, borderRadius: 2, background: 'rgba(255,255,255,0.38)', filter: 'blur(1px)', animation: `steamWaft ${1.5+i*0.35}s ease-out infinite`, animationDelay: `${i*0.45}s` }} />
+              <div key={i} style={{ position: 'absolute', bottom: 8, left: 1, width: 3, height: 22, borderRadius: 2, background: 'rgba(255,255,255,0.45)', filter: 'blur(1.5px)', animation: `steamWaft ${1.4+i*0.3}s ease-out infinite`, animationDelay: `${i*0.4}s` }} />
             ))}
           </div>
           {/* Jug */}
@@ -169,7 +169,6 @@ function CoffeeScene({ progress }: { progress: number }) {
         <div style={{ position: 'relative', width: 184, height: 155 }}>
           {/* Cup + saucer */}
           <div style={{ position: 'absolute', bottom: 0, left: '50%', transform: 'translateX(-50%)' }}>
-            <div style={{ width: 98, height: 10, borderRadius: '50%', background: 'linear-gradient(180deg,#ddd 0%,#bbb 100%)', marginBottom: -1, boxShadow: '0 4px 10px rgba(0,0,0,0.35)' }} />
             <div style={{ width: 78, height: 56, marginLeft: 10, borderRadius: '4px 4px 16px 16px', position: 'relative', overflow: 'hidden',
               background: 'linear-gradient(135deg,#f4f3f0 0%,#e8e6e0 40%,#f0ede8 100%)',
               boxShadow: 'inset -4px 0 9px rgba(0,0,0,0.09), 0 2px 8px rgba(0,0,0,0.3)',
@@ -189,10 +188,12 @@ function CoffeeScene({ progress }: { progress: number }) {
               </div>
             </div>
             <div style={{ position: 'absolute', right: 4, bottom: 11, width: 15, height: 24, border: '3px solid #ddd', borderLeft: 'none', borderRadius: '0 9px 9px 0' }} />
+            {/* Saucer — below cup */}
+            <div style={{ position: 'absolute', bottom: -10, left: -10, width: 98, height: 10, borderRadius: '50%', background: 'linear-gradient(180deg,#ddd 0%,#bbb 100%)', boxShadow: '0 4px 10px rgba(0,0,0,0.35)' }} />
           </div>
           {/* Pour stream */}
           {sp < 0.94 && (
-            <div style={{ position: 'absolute', top: 12, left: '68%', width: 3, height: `${28+sp*28}px`, background: 'linear-gradient(180deg,rgba(242,232,212,0.9),rgba(220,200,168,0.7))', borderRadius: 2, transform: 'rotate(11deg)', transformOrigin: 'top center', animation: 'pourWiggle 0.45s ease-in-out infinite', boxShadow: '0 0 5px rgba(220,200,168,0.4)' }} />
+            <div style={{ position: 'absolute', top: 14, left: '60%', width: 6, height: `${32+sp*32}px`, background: 'linear-gradient(180deg,rgba(252,242,222,0.95),rgba(230,210,178,0.85))', borderRadius: 3, transform: 'rotate(14deg)', transformOrigin: 'top center', animation: 'pourWiggle 0.45s ease-in-out infinite', boxShadow: '0 0 8px rgba(230,210,178,0.5)' }} />
           )}
           {/* Tilted jug */}
           <div style={{ position: 'absolute', top: 0, right: 0, width: 50, height: 65,
@@ -613,15 +614,31 @@ function MarioPixel({ frame }: { frame: number }) {
   )
 }
 
-function MarioScene({ progress }: { progress: number }) {
+function MarioScene({ progress, done }: { progress: number; done?: boolean }) {
   const [frame, setFrame] = useState(0)
+  const [isJumping, setIsJumping] = useState(false)
   const fRef = useRef<ReturnType<typeof setInterval>|null>(null)
+  const jRef = useRef<ReturnType<typeof setInterval>|null>(null)
+  const jTRef = useRef<ReturnType<typeof setTimeout>|null>(null)
   useEffect(() => {
     fRef.current = setInterval(() => setFrame(f => (f+1)%3), 140)
     return () => { if (fRef.current) clearInterval(fRef.current) }
   }, [])
+  useEffect(() => {
+    if (done) return
+    jRef.current = setInterval(() => {
+      setIsJumping(true)
+      jTRef.current = setTimeout(() => setIsJumping(false), 520)
+    }, 3100)
+    return () => {
+      if (jRef.current) clearInterval(jRef.current)
+      if (jTRef.current) clearTimeout(jTRef.current)
+    }
+  }, [done])
   const score = Math.floor(progress * 840) * 100
   const coins = Math.floor(progress * 0.38)
+  const showFlag = progress >= 88
+  const marioOnPole = done
   return (
     <div style={{ position:'relative', height:220, overflow:'hidden', borderRadius:12 }}>
       <style>{`
@@ -631,6 +648,8 @@ function MarioScene({ progress }: { progress: number }) {
         @keyframes mBob{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
         @keyframes mCoin{0%,100%{transform:scaleX(1)}45%,55%{transform:scaleX(0.08)}}
         @keyframes mQ{0%,100%{box-shadow:inset -2px -3px 0 rgba(0,0,0,0.22),0 0 4px rgba(249,202,36,0.3)}50%{box-shadow:inset -2px -3px 0 rgba(0,0,0,0.22),0 0 14px rgba(249,202,36,0.9)}}
+        @keyframes mFlagSlide{0%{transform:translateY(0)}85%{transform:translateY(108px)}100%{transform:translateY(108px)}}
+        @keyframes mFlagAppear{from{opacity:0}to{opacity:1}}
       `}</style>
       <div style={{ position:'absolute', inset:0, background:'linear-gradient(180deg,#5c94fc 0%,#9ab8ff 100%)' }} />
       {/* Hills */}
@@ -695,16 +714,33 @@ function MarioScene({ progress }: { progress: number }) {
           </div>
         ) : <div key={i} style={{ flexShrink:0, width:70+i*10 }} />)}
       </div>
-      {/* Flag */}
-      <div style={{ position:'absolute', bottom:52, right:'5%' }}>
-        <div style={{ width:4, height:120, background:'linear-gradient(180deg,#b0b0b0,#888)', margin:'0 auto', boxShadow:'1px 0 3px rgba(0,0,0,0.3)' }} />
-        <div style={{ position:'absolute', top:0, left:4, width:18, height:12, background:'linear-gradient(135deg,#2d9e2d,#56cc56)', clipPath:'polygon(0 0,100% 50%,0 100%)' }} />
-        <div style={{ position:'absolute', bottom:-6, left:-6, width:16, height:6, background:'#888', borderRadius:'0 0 3px 3px' }} />
-      </div>
-      {/* Mario */}
-      <div style={{ position:'absolute', bottom:52, left:'18%', animation:'mBob 0.28s ease-in-out infinite' }}>
-        <MarioPixel frame={frame} />
-      </div>
+      {/* Flag — appears near the end */}
+      {showFlag && (
+        <div style={{ position:'absolute', bottom:52, right:'5%', animation:'mFlagAppear 1s ease forwards' }}>
+          <div style={{ width:4, height:120, background:'linear-gradient(180deg,#b0b0b0,#888)', margin:'0 auto', boxShadow:'1px 0 3px rgba(0,0,0,0.3)' }} />
+          <div style={{ position:'absolute', top:0, left:4, width:18, height:12, background:'linear-gradient(135deg,#2d9e2d,#56cc56)', clipPath:'polygon(0 0,100% 50%,0 100%)' }} />
+          <div style={{ position:'absolute', bottom:-6, left:-6, width:16, height:6, background:'#888', borderRadius:'0 0 3px 3px' }} />
+        </div>
+      )}
+      {/* Mario — running & jumping, then slides down flag on completion */}
+      {!marioOnPole && (
+        <div style={{
+          position:'absolute', bottom:52, left:'18%',
+          transform: isJumping ? 'translateY(-44px)' : 'translateY(0)',
+          transition: isJumping ? 'transform 0.18s ease-out' : 'transform 0.34s cubic-bezier(0.55,0,1,1)',
+          animation: isJumping ? 'none' : 'mBob 0.28s ease-in-out infinite',
+        }}>
+          <MarioPixel frame={isJumping ? 1 : frame} />
+        </div>
+      )}
+      {marioOnPole && (
+        <div style={{
+          position:'absolute', bottom: 52+108, right:'calc(5% - 10px)',
+          animation:'mFlagSlide 2s ease-in forwards',
+        }}>
+          <MarioPixel frame={1} />
+        </div>
+      )}
       {/* HUD */}
       <div style={{ position:'absolute', top:6, left:10, right:10, display:'flex', justifyContent:'space-between', fontFamily:'"Courier New",monospace', fontSize:10, fontWeight:'bold', color:'white', textShadow:'1px 1px 0 rgba(0,0,0,0.8)' }}>
         <div><div style={{opacity:0.7}}>MARIO</div>{String(score).padStart(6,'0')}</div>
@@ -1253,7 +1289,7 @@ function FocusInner() {
       case 'coffee':    return <CoffeeScene    progress={progress} />
       case 'plant':     return <PlantScene     progress={progress} />
       case 'butterfly': return <ButterflyScene progress={progress} />
-      case 'mario':     return <MarioScene      progress={progress} />
+      case 'mario':     return <MarioScene      progress={progress} done={done} />
       case 'candle':    return <CandleScene    progress={progress} />
       default:          return <CoffeeScene    progress={progress} />
     }

@@ -317,6 +317,20 @@ function FlashcardsInner() {
                   </div>
                   <div className="flex items-center gap-2">
                     <button
+                      onClick={async e => {
+                        e.stopPropagation()
+                        const wb = await api.getWhiteboard(set.course_id, userId).catch(() => null)
+                        const pages = wb?.pages || (wb?.pdf_url ? [{ id: 'default', pdf_url: wb.pdf_url, pdf_name: wb.pdf_name, name: wb.pdf_name }] : [])
+                        const first = pages.find((p: any) => p.pdf_url)
+                        if (!first) { alert('No PDF uploaded for this module yet. Upload one from the Whiteboard first.'); return }
+                        sessionStorage.setItem('gauntletPdf', JSON.stringify({ pdfUrl: first.pdf_url, pdfName: first.pdf_name || first.name, courseId: set.course_id, userId }))
+                        router.push('/games/gauntlet')
+                      }}
+                      className="hidden rounded px-2 py-1 text-xs transition-colors group-hover:block"
+                      style={{ border: `1px solid ${NOTION.btnBorder}`, color: '#6366F1', backgroundColor: NOTION.btn }}>
+                      ⚔️ Gauntlet
+                    </button>
+                    <button
                       onClick={e => { e.stopPropagation(); router.push(`/flashcards/${set.id}/jeopardy`) }}
                       className="hidden rounded px-2 py-1 text-xs transition-colors group-hover:block"
                       style={{ border: `1px solid ${NOTION.btnBorder}`, color: NOTION.text, backgroundColor: NOTION.btn }}>

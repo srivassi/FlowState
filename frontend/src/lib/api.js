@@ -65,4 +65,8 @@ export const api = {
   chatOnNote: (data) => req('/whiteboard/chat', { method: 'POST', body: JSON.stringify(data) }),
   forkNote: (data) => req('/whiteboard/fork', { method: 'POST', body: JSON.stringify(data) }),
   extractSections: (pdfUrl) => req('/whiteboard/extract-sections', { method: 'POST', body: JSON.stringify({ pdf_url: pdfUrl }) }),
+
+  // ── Gauntlet ──────────────────────────────────────────────────
+  gauntletStart: (pdfUrl) => req('/tutor/start', { method: 'POST', body: JSON.stringify({ pdf_url: pdfUrl }) }),
+  gauntletChat: (data) => req('/tutor/chat', { method: 'POST', body: JSON.stringify(data) }),
 }

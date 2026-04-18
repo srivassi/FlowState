@@ -48,6 +48,9 @@ export default function SettingsPage() {
   const [userId, setUserId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [scheduleStale, setScheduleStale] = useState(false)
+  // snapshot of schedule-affecting fields at load time
+  const scheduleSnapshot = React.useRef({ sessionsPerDay: 2, sessionDurationH: 2 })
   const [rescheduling, setRescheduling] = useState(false)
   const [rescheduleFeedback, setRescheduleFeedback] = useState('')
   const [showReschedule, setShowReschedule] = useState(false)
@@ -80,8 +83,12 @@ export default function SettingsPage() {
       ])
       if (profile) {
         setDisplayName(profile.display_name || '')
-        setSessionsPerDay(profile.sessions_per_day || 2)
-        setSessionDurationH(profile.session_duration_minutes ? Math.round(profile.session_duration_minutes / 60) : 2)
+        const spd = profile.sessions_per_day || 2
+        const sdh = profile.session_duration_minutes ? Math.round(profile.session_duration_minutes / 60) : 2
+        setSessionsPerDay(spd)
+        setSessionDurationH(sdh)
+        scheduleSnapshot.current = { sessionsPerDay: spd, sessionDurationH: sdh }
+
         setPomodoroWork(String(profile.pomodoro_work_minutes || 25))
         setPomodoroBreak(String(profile.pomodoro_break_minutes || 5))
         setLongBreak(String(profile.long_break_minutes || 15))
@@ -115,6 +122,11 @@ export default function SettingsPage() {
       })
       // Also update Supabase auth metadata for display name
       if (displayName) await supabase.auth.updateUser({ data: { full_name: displayName } })
+      const snap = scheduleSnapshot.current
+      if (sessionsPerDay !== snap.sessionsPerDay || sessionDurationH !== snap.sessionDurationH) {
+        setScheduleStale(true)
+        scheduleSnapshot.current = { sessionsPerDay, sessionDurationH }
+      }
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } catch (e) { console.error(e) }
@@ -151,6 +163,33 @@ export default function SettingsPage() {
           {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save changes'}
         </button>
       </div>
+
+      {scheduleStale && (
+        <div className="flex items-center justify-between gap-4 px-6 py-3 text-sm"
+          style={{ backgroundColor: '#FFFBEB', borderBottom: '1px solid #FDE68A', color: '#92400E' }}>
+          <span>⚠️ Your session settings changed — your task schedule may be out of date.</span>
+          <div className="flex shrink-0 items-center gap-3">
+            <button
+              disabled={rescheduling}
+              onClick={async () => {
+                if (!userId) return
+                setRescheduling(true)
+                try {
+                  await api.fullReschedule(userId, 'User updated session settings — please replan accordingly.')
+                  setScheduleStale(false)
+                  setRescheduled(true)
+                  setTimeout(() => setRescheduled(false), 3000)
+                } catch (e) { console.error(e) }
+                finally { setRescheduling(false) }
+              }}
+              className="rounded px-3 py-1 text-xs font-semibold transition hover:opacity-80 disabled:opacity-50"
+              style={{ backgroundColor: '#F59E0B', color: '#fff' }}>
+              {rescheduling ? 'Regenerating…' : rescheduled ? '✓ Done' : 'Regenerate now'}
+            </button>
+            <button onClick={() => setScheduleStale(false)} className="text-xs opacity-60 hover:opacity-100">Dismiss</button>
+          </div>
+        </div>
+      )}
 
       <div className="mx-auto max-w-2xl px-6 py-10">
 

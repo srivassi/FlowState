@@ -344,6 +344,7 @@ export default function Dashboard() {
             {[
               { href: '/calendar',    label: 'Calendar',   icon: '📅' },
               { href: '/flashcards',  label: 'Flashcards', icon: '🃏' },
+              { href: '/games',       label: 'Games',      icon: '🎮' },
               { href: '/whiteboard',  label: 'Whiteboard', icon: '🎨' },
               { href: '/settings',    label: 'Settings',   icon: '⚙️' },
             ].map(item => (

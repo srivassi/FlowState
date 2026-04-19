@@ -213,6 +213,18 @@ def generate_flashcards(
             except Exception:
                 pass
 
+    # 4. Response truncated mid-stream — salvage complete objects before the cut
+    if cards is None:
+        start = raw.find("[")
+        if start != -1:
+            truncated = raw[start:]
+            last_brace = truncated.rfind("}")
+            if last_brace != -1:
+                try:
+                    cards = json.loads(truncated[:last_brace + 1] + "]")
+                except Exception:
+                    pass
+
     if cards is None:
         raise HTTPException(status_code=500, detail=f"Claude returned invalid JSON. Raw (first 500 chars): {raw[:500]!r}")
 

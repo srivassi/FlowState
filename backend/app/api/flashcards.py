@@ -6,6 +6,7 @@ import anthropic
 import os
 import io
 import json
+import re
 import uuid
 
 try:
@@ -186,16 +187,33 @@ def generate_flashcards(
 
     raw = response.content[0].text.strip()
 
-    # Strip markdown fences if present
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    raw = raw.strip()
-
+    # Try to extract a JSON array from the response robustly
+    cards = None
+    # 1. Direct parse
     try:
         cards = json.loads(raw)
     except Exception:
+        pass
+
+    # 2. Strip markdown fences and retry
+    if cards is None:
+        fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw)
+        if fence_match:
+            try:
+                cards = json.loads(fence_match.group(1).strip())
+            except Exception:
+                pass
+
+    # 3. Extract the first [...] array found in the text
+    if cards is None:
+        array_match = re.search(r"\[[\s\S]*\]", raw)
+        if array_match:
+            try:
+                cards = json.loads(array_match.group(0))
+            except Exception:
+                pass
+
+    if cards is None:
         raise HTTPException(status_code=500, detail="Claude returned invalid JSON")
 
     if not isinstance(cards, list):

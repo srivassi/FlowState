@@ -212,6 +212,54 @@ function CoffeeScene({ progress }: { progress: number }) {
 }
 
 // ── Plant ─────────────────────────────────────────────────────
+function FlowerBlossom() {
+  const petals = 8
+  return (
+    <div style={{ position: 'relative', width: 64, height: 64 }}>
+      <style>{`
+        @keyframes petalOpen{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+        @keyframes centerPop{from{transform:translate(-50%,-50%) scale(0)}to{transform:translate(-50%,-50%) scale(1)}}
+        @keyframes stamenPop{from{opacity:0;transform:scale(0)}to{opacity:1;transform:scale(1)}}
+      `}</style>
+      {Array.from({ length: petals }).map((_, i) => (
+        <div key={i} style={{ position:'absolute', left:'50%', top:'50%', transform:`rotate(${i*45}deg)`, transformOrigin:'0 0' }}>
+          <div style={{
+            position:'absolute', left:-7, top:-26, width:14, height:24,
+            borderRadius:'50% 50% 20% 20%',
+            background: i%2===0
+              ? 'linear-gradient(180deg,#fda4af 0%,#fb7185 100%)'
+              : 'linear-gradient(180deg,#fecdd3 0%,#fda4af 100%)',
+            transformOrigin:'50% 100%',
+            animation:`petalOpen 0.45s ease-out ${i*0.06}s backwards`,
+            boxShadow:'inset 0 2px 4px rgba(255,255,255,0.4)',
+          }} />
+        </div>
+      ))}
+      {[0,1,2,3,4].map((_, i) => {
+        const a = i * 72 * Math.PI / 180
+        return (
+          <div key={i} style={{
+            position:'absolute', left:'50%', top:'50%',
+            width:4, height:4, borderRadius:'50%',
+            background:'#f59e0b',
+            transform:`translate(calc(-50% + ${Math.cos(a)*7}px), calc(-50% + ${Math.sin(a)*7}px))`,
+            animation:`stamenPop 0.3s ease-out ${0.5+i*0.04}s backwards`,
+          }} />
+        )
+      })}
+      <div style={{
+        position:'absolute', left:'50%', top:'50%',
+        width:20, height:20, borderRadius:'50%',
+        background:'radial-gradient(circle,#fef08a 0%,#f59e0b 70%)',
+        transform:'translate(-50%,-50%)',
+        boxShadow:'0 0 8px rgba(245,158,11,0.6)',
+        zIndex:1,
+        animation:'centerPop 0.4s cubic-bezier(0.34,1.56,0.64,1) 0.48s backwards',
+      }} />
+    </div>
+  )
+}
+
 function PlantScene({ progress }: { progress: number }) {
   const stemH = Math.min(140, 16 + progress * 1.35)
   const leaf1W = Math.min(46, Math.max(0, (progress - 18) * 1.1))
@@ -327,12 +375,12 @@ function PlantScene({ progress }: { progress: number }) {
       {showFlower && (
         <div style={{
           position: 'absolute',
-          bottom: 52 + stemH,
+          bottom: 52 + stemH - 32,
           left: '50%', transform: 'translateX(-50%)',
-          fontSize: 30,
-          animation: 'bloomIn 1.2s cubic-bezier(0.34,1.56,0.64,1) forwards',
-          filter: 'drop-shadow(0 0 8px rgba(255,180,200,0.6))',
-        }}>🌸</div>
+          filter: 'drop-shadow(0 0 10px rgba(255,100,150,0.45))',
+        }}>
+          <FlowerBlossom />
+        </div>
       )}
     </div>
   )
@@ -584,6 +632,61 @@ function ButterflyScene({ progress }: { progress: number }) {
 }
 
 // ── Mario ─────────────────────────────────────────────────────
+function GoombaPx({ flip }: { flip: boolean }) {
+  return (
+    <div style={{ position:'relative', width:30, height:30 }}>
+      <div style={{ position:'absolute', top:0, left:3, right:3, height:18, borderRadius:'8px 8px 3px 3px', background:'#a85a00' }} />
+      <div style={{ position:'absolute', top:2, left:1, right:1, height:8, borderRadius:'6px 6px 0 0', background:'#7a3b00' }} />
+      <div style={{ position:'absolute', top:9, left:5, width:8, height:8, borderRadius:'50%', background:'white' }}>
+        <div style={{ position:'absolute', top:2, right:1, width:4, height:4, borderRadius:'50%', background:'#000' }} />
+      </div>
+      <div style={{ position:'absolute', top:9, right:5, width:8, height:8, borderRadius:'50%', background:'white' }}>
+        <div style={{ position:'absolute', top:2, left:1, width:4, height:4, borderRadius:'50%', background:'#000' }} />
+      </div>
+      <div style={{ position:'absolute', bottom:0, left: flip ? 1 : 4, width:11, height:11, borderRadius:'3px 3px 5px 5px', background:'#7a3b00', transition:'left 0.18s' }} />
+      <div style={{ position:'absolute', bottom:0, right: flip ? 1 : 4, width:11, height:11, borderRadius:'3px 3px 5px 5px', background:'#7a3b00', transition:'right 0.18s' }} />
+    </div>
+  )
+}
+
+function KoopaPx({ flip }: { flip: boolean }) {
+  return (
+    <div style={{ position:'relative', width:28, height:40 }}>
+      {/* Head */}
+      <div style={{ position:'absolute', top:0, left: flip ? 13 : 3, width:14, height:13, borderRadius:'50% 50% 30% 30%', background:'#8bc34a' }} />
+      <div style={{ position:'absolute', top:2, left: flip ? 15 : 5, width:6, height:6, borderRadius:'50%', background:'white' }}>
+        <div style={{ position:'absolute', top:1, left: flip ? 0 : 2, width:3, height:3, borderRadius:'50%', background:'#111' }} />
+      </div>
+      {/* Shell */}
+      <div style={{ position:'absolute', top:11, left:1, right:1, height:21, borderRadius:'50% 50% 18% 18%', background:'linear-gradient(160deg,#43a047 0%,#2e7d32 55%,#1b5e20 100%)', boxShadow:'inset -3px -3px 6px rgba(0,0,0,0.3)' }} />
+      <div style={{ position:'absolute', top:15, left:5, right:5, height:11, borderRadius:'50%', background:'rgba(255,255,255,0.14)' }} />
+      <div style={{ position:'absolute', top:21, left:'50%', transform:'translateX(-50%)', width:2, height:10, background:'rgba(0,0,0,0.15)' }} />
+      {/* Feet */}
+      <div style={{ position:'absolute', bottom:0, left: flip ? 1 : 5, width:11, height:10, borderRadius:'3px 3px 6px 6px', background:'#f9a825', transition:'left 0.2s' }} />
+      <div style={{ position:'absolute', bottom:0, right: flip ? 1 : 5, width:11, height:10, borderRadius:'3px 3px 6px 6px', background:'#f9a825', transition:'right 0.2s' }} />
+    </div>
+  )
+}
+
+function PiranhaPlant() {
+  return (
+    <div style={{ position:'relative', width:30, height:46 }}>
+      {/* Stem */}
+      <div style={{ position:'absolute', bottom:0, left:'50%', transform:'translateX(-50%)', width:6, height:30, background:'linear-gradient(180deg,#43a047,#2e7d32)', borderRadius:3 }} />
+      {/* Head */}
+      <div style={{ position:'absolute', top:0, left:'50%', transform:'translateX(-50%)', width:28, height:24, borderRadius:'50% 50% 6px 6px', background:'linear-gradient(180deg,#e53935 0%,#b71c1c 100%)', boxShadow:'inset -3px -3px 6px rgba(0,0,0,0.3)' }} />
+      {/* Spots */}
+      {[{l:4,t:5},{l:15,t:3},{l:8,t:13}].map((p,i) => (
+        <div key={i} style={{ position:'absolute', left:p.l, top:p.t, width:5, height:5, borderRadius:'50%', background:'rgba(255,255,255,0.55)' }} />
+      ))}
+      {/* Teeth top */}
+      <div style={{ position:'absolute', top:16, left:3, right:3, height:8, display:'flex', justifyContent:'space-around' }}>
+        {[0,1,2].map(i => <div key={i} style={{ width:5, height:7, background:'white', borderRadius:'0 0 3px 3px' }} />)}
+      </div>
+    </div>
+  )
+}
+
 const PX = 3
 type PixelDef = [number,number,number,number,string]
 const MARIO_BASE: PixelDef[] = [
@@ -617,21 +720,57 @@ function MarioPixel({ frame }: { frame: number }) {
 function MarioScene({ progress, done }: { progress: number; done?: boolean }) {
   const [frame, setFrame] = useState(0)
   const [isJumping, setIsJumping] = useState(false)
+  const [goombax, setGoombax]   = useState(340)
+  const [goombax2, setGoombax2] = useState(500)
+  const [koopax, setKoopax]     = useState(480)
+  const [eFlip, setEFlip]       = useState(false)
   const fRef = useRef<ReturnType<typeof setInterval>|null>(null)
-  const jRef = useRef<ReturnType<typeof setInterval>|null>(null)
+  const gRef = useRef<ReturnType<typeof setInterval>|null>(null)
   const jTRef = useRef<ReturnType<typeof setTimeout>|null>(null)
+  const gxRef  = useRef(340)
+  const gx2Ref = useRef(500)
+  const kxRef  = useRef(480)
+  const jumpedRef  = useRef(false)
+  const jumped2Ref = useRef(false)
+  const kjumpedRef = useRef(false)
+  const isJumpingRef = useRef(false)
+
+  const jumpNow = () => {
+    if (isJumpingRef.current) return
+    isJumpingRef.current = true
+    setIsJumping(true)
+    if (jTRef.current) clearTimeout(jTRef.current)
+    jTRef.current = setTimeout(() => { isJumpingRef.current = false; setIsJumping(false) }, 520)
+  }
+
   useEffect(() => {
     fRef.current = setInterval(() => setFrame(f => (f+1)%3), 140)
     return () => { if (fRef.current) clearInterval(fRef.current) }
   }, [])
+
   useEffect(() => {
     if (done) return
-    jRef.current = setInterval(() => {
-      setIsJumping(true)
-      jTRef.current = setTimeout(() => setIsJumping(false), 520)
-    }, 3100)
+    gRef.current = setInterval(() => {
+      // Goomba 1 — fast
+      gxRef.current -= 1.7
+      if (gxRef.current < -50) { gxRef.current = 340; jumpedRef.current = false }
+      setGoombax(gxRef.current)
+      // Goomba 2 — slightly behind, same speed
+      gx2Ref.current -= 1.7
+      if (gx2Ref.current < -50) { gx2Ref.current = 390; jumped2Ref.current = false }
+      setGoombax2(gx2Ref.current)
+      // Koopa — slower, different cycle
+      kxRef.current -= 1.1
+      if (kxRef.current < -50) { kxRef.current = 520; kjumpedRef.current = false }
+      setKoopax(kxRef.current)
+      setEFlip(f => !f)
+      // Jump when any enemy is in danger zone (Mario ≈ x60)
+      if (!jumpedRef.current  && gxRef.current  < 135 && gxRef.current  > 80) { jumpedRef.current  = true; jumpNow() }
+      if (!jumped2Ref.current && gx2Ref.current < 135 && gx2Ref.current > 80) { jumped2Ref.current = true; jumpNow() }
+      if (!kjumpedRef.current && kxRef.current  < 150 && kxRef.current  > 90) { kjumpedRef.current = true; jumpNow() }
+    }, 50)
     return () => {
-      if (jRef.current) clearInterval(jRef.current)
+      if (gRef.current) clearInterval(gRef.current)
       if (jTRef.current) clearTimeout(jTRef.current)
     }
   }, [done])
@@ -650,6 +789,7 @@ function MarioScene({ progress, done }: { progress: number; done?: boolean }) {
         @keyframes mQ{0%,100%{box-shadow:inset -2px -3px 0 rgba(0,0,0,0.22),0 0 4px rgba(249,202,36,0.3)}50%{box-shadow:inset -2px -3px 0 rgba(0,0,0,0.22),0 0 14px rgba(249,202,36,0.9)}}
         @keyframes mFlagSlide{0%{transform:translateY(0)}85%{transform:translateY(108px)}100%{transform:translateY(108px)}}
         @keyframes mFlagAppear{from{opacity:0}to{opacity:1}}
+        @keyframes mPlant{0%,35%{transform:translateY(50px)}50%,85%{transform:translateY(0px)}100%{transform:translateY(50px)}}
       `}</style>
       <div style={{ position:'absolute', inset:0, background:'linear-gradient(180deg,#5c94fc 0%,#9ab8ff 100%)' }} />
       {/* Hills */}
@@ -722,6 +862,26 @@ function MarioScene({ progress, done }: { progress: number; done?: boolean }) {
           <div style={{ position:'absolute', bottom:-6, left:-6, width:16, height:6, background:'#888', borderRadius:'0 0 3px 3px' }} />
         </div>
       )}
+      {/* Piranha plant — pops from fixed pipe */}
+      {!marioOnPole && (
+        <div style={{ position:'absolute', bottom:62, right:'28%', zIndex:3, overflow:'hidden', height:50 }}>
+          <div style={{ animation:'mPlant 3.4s ease-in-out infinite', animationDelay:'1.2s' }}>
+            <PiranhaPlant />
+          </div>
+        </div>
+      )}
+      {/* Enemies */}
+      {!marioOnPole && (<>
+        <div style={{ position:'absolute', bottom:52, left: goombax, zIndex:2 }}>
+          <GoombaPx flip={eFlip} />
+        </div>
+        <div style={{ position:'absolute', bottom:52, left: goombax2, zIndex:2 }}>
+          <GoombaPx flip={!eFlip} />
+        </div>
+        <div style={{ position:'absolute', bottom:52, left: koopax, zIndex:2 }}>
+          <KoopaPx flip={eFlip} />
+        </div>
+      </>)}
       {/* Mario — running & jumping, then slides down flag on completion */}
       {!marioOnPole && (
         <div style={{
@@ -746,188 +906,6 @@ function MarioScene({ progress, done }: { progress: number; done?: boolean }) {
         <div><div style={{opacity:0.7}}>MARIO</div>{String(score).padStart(6,'0')}</div>
         <div style={{textAlign:'center'}}><div style={{opacity:0.7}}>COINS</div>🪙×{String(coins).padStart(2,'0')}</div>
         <div style={{textAlign:'right'}}><div style={{opacity:0.7}}>WORLD</div>1–{Math.min(4,Math.floor(progress/25)+1)}</div>
-      </div>
-    </div>
-  )
-}
-
-// ── Cloud shape helper (kept for porthole if needed) ──────────
-function CloudBlob({ w, tint = 'rgba(255,255,255,0.9)' }: { w: number; tint?: string }) {
-  const h = Math.round(w * 0.36)
-  const s = (n: number) => Math.round(w * n)
-  return (
-    <div style={{ position: 'relative', display: 'inline-block', width: w, height: h + s(0.42), flexShrink: 0 }}>
-      <div style={{ position: 'absolute', bottom: 0, left: 0, width: w, height: h, borderRadius: h / 2, background: tint, filter: 'blur(1.5px)' }} />
-      <div style={{ position: 'absolute', bottom: h - s(0.1), left: s(0.06), width: s(0.36), height: s(0.36), borderRadius: '50%', background: tint, filter: 'blur(1px)' }} />
-      <div style={{ position: 'absolute', bottom: h - s(0.15), left: s(0.24), width: s(0.44), height: s(0.44), borderRadius: '50%', background: tint, filter: 'blur(0.5px)' }} />
-      <div style={{ position: 'absolute', bottom: h - s(0.08), left: s(0.58), width: s(0.3), height: s(0.3), borderRadius: '50%', background: tint, filter: 'blur(1px)' }} />
-    </div>
-  )
-}
-
-// ── Flight ────────────────────────────────────────────────────
-function skyColor(p: number): string {
-  if (p < 15) {
-    // pre-dawn: deep navy → hints of orange on horizon
-    const t = p / 15
-    return `linear-gradient(180deg,
-      hsl(225,55%,${8 + t * 4}%) 0%,
-      hsl(${220 - t * 160},${40 + t * 40}%,${12 + t * 28}%) 65%,
-      hsl(${30 - t * 5},${50 + t * 30}%,${18 + t * 32}%) 100%)`
-  } else if (p < 40) {
-    // dawn → morning
-    const t = (p - 15) / 25
-    return `linear-gradient(180deg,
-      hsl(${210 + t * 5},${55 + t * 5}%,${12 + t * 28}%) 0%,
-      hsl(${210 - t * 10},${60 - t * 10}%,${40 + t * 18}%) 60%,
-      hsl(${25 + t * 5},${70 - t * 20}%,${50 - t * 10}%) 100%)`
-  } else if (p < 65) {
-    // clear day
-    const t = (p - 40) / 25
-    return `linear-gradient(180deg,
-      hsl(${215 - t * 5},${65}%,${40 + t * 5}%) 0%,
-      hsl(${205},${60}%,${55 + t * 5}%) 100%)`
-  } else if (p < 85) {
-    // dusk
-    const t = (p - 65) / 20
-    return `linear-gradient(180deg,
-      hsl(${210 - t * 170},${65 - t * 20}%,${45 - t * 30}%) 0%,
-      hsl(${30 - t * 10},${75 + t * 5}%,${45 - t * 25}%) 55%,
-      hsl(${270 + t * 10},${40 + t * 10}%,${30 - t * 10}%) 100%)`
-  } else {
-    // night
-    const t = (p - 85) / 15
-    return `linear-gradient(180deg,
-      hsl(235,${55 - t * 10}%,${15 - t * 4}%) 0%,
-      hsl(230,${45 - t * 8}%,${20 - t * 6}%) 100%)`
-  }
-}
-
-function FlightScene({ progress }: { progress: number }) {
-  const isNight = progress >= 75
-  const isDusk  = progress >= 58 && progress < 88
-  const isDawn  = progress < 18
-  const sky = skyColor(progress)
-  const cloudTint = isNight
-    ? 'rgba(130,145,180,0.22)'
-    : isDusk
-    ? 'rgba(255,170,90,0.75)'
-    : 'rgba(255,255,255,0.88)'
-
-  return (
-    <div style={{ position: 'relative', height: 220, borderRadius: 18, overflow: 'hidden', background: '#181820' }}>
-      <style>{`
-        @keyframes cl1{0%{transform:translateX(0)}100%{transform:translateX(-560px)}}
-        @keyframes cl2{0%{transform:translateX(0)}100%{transform:translateX(-460px)}}
-        @keyframes cl3{0%{transform:translateX(0)}100%{transform:translateX(-340px)}}
-        @keyframes twinkle{0%,100%{opacity:0.8}50%{opacity:0.18}}
-        @keyframes glassShimmer{0%,100%{opacity:0.05}50%{opacity:0.12}}
-      `}</style>
-
-      {/* Cabin wall vignette */}
-      <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(ellipse at 50% 50%, transparent 52%, rgba(10,10,16,0.82) 100%)', zIndex: 4, pointerEvents: 'none' }} />
-
-      {/* Porthole frame */}
-      <div style={{
-        position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
-        width: 258, height: 192, borderRadius: '50%', zIndex: 3,
-        border: '16px solid rgba(38,38,44,0.97)',
-        boxShadow: 'inset 0 0 0 3px rgba(255,255,255,0.07), inset 0 6px 20px rgba(0,0,0,0.7), 0 0 0 3px rgba(22,22,28,0.9), 0 8px 30px rgba(0,0,0,0.8)',
-        overflow: 'hidden',
-      }}>
-        {/* Sky */}
-        <div style={{ position: 'absolute', inset: 0, background: sky, transition: 'background 7s ease' }} />
-
-        {/* Horizon glow */}
-        {(isDawn || isDusk) && (
-          <div style={{
-            position: 'absolute', bottom: '22%', left: 0, right: 0, height: 48,
-            background: `linear-gradient(180deg, transparent, ${isDusk ? 'rgba(255,110,30,0.45)' : 'rgba(255,160,60,0.38)'})`,
-            filter: 'blur(10px)',
-          }} />
-        )}
-
-        {/* Stars */}
-        {isNight && [
-          [12,8],[32,13],[50,5],[67,17],[82,8],[90,22],[24,20],[57,11],[76,5],[40,16],[18,28],[62,24],
-        ].map(([x,y],i) => (
-          <div key={i} style={{
-            position: 'absolute', left: `${x}%`, top: `${y}%`,
-            width: i%3===0?2:1.5, height: i%3===0?2:1.5, borderRadius: '50%', background: 'white',
-            opacity: Math.min(1,(progress-75)/16)*0.75,
-            animation: `twinkle ${2.2+(i%4)*0.7}s ease-in-out infinite`,
-            animationDelay: `${(i*0.38)%2.8}s`,
-          }} />
-        ))}
-
-        {/* Moon */}
-        {isNight && (
-          <div style={{
-            position: 'absolute', top: '8%', right: '16%',
-            width: 22, height: 22, borderRadius: '50%',
-            background: 'radial-gradient(circle at 38% 38%,#f0e8ce,#c8bc90)',
-            boxShadow: '0 0 14px rgba(240,230,180,0.4)',
-            opacity: Math.min(1,(progress-75)/14),
-          }} />
-        )}
-
-        {/* Sun */}
-        {!isNight && (
-          <div style={{
-            position: 'absolute',
-            left: `${isDawn ? 18 : 12 + progress*0.48}%`,
-            top: isDawn ? `${52-(progress/18)*34}%` : `${Math.max(4,22-(progress-18)*0.28)}%`,
-            width: isDawn?16:20, height: isDawn?16:20, borderRadius: '50%',
-            background: isDawn
-              ? 'radial-gradient(circle,#ff9040,#ff5500)'
-              : 'radial-gradient(circle,#fffaaa,#ffd020)',
-            boxShadow: isDawn
-              ? '0 0 18px rgba(255,130,40,0.7)'
-              : '0 0 22px rgba(255,210,30,0.55)',
-            opacity: isDawn ? Math.min(1,progress/14) : 1,
-            transition: 'left 8s ease, top 8s ease',
-          }} />
-        )}
-
-        {/* Cloud layer 3 — far, slow */}
-        <div style={{ position: 'absolute', top: '16%', display: 'flex', gap: 28, animation: 'cl3 75s linear infinite', opacity: isNight?0.09:isDusk?0.52:0.24 }}>
-          {[48,40,56,44,50,46,52,42,54].map((w,i) => <CloudBlob key={i} w={w} tint={cloudTint} />)}
-        </div>
-
-        {/* Cloud layer 2 — mid */}
-        <div style={{ position: 'absolute', top: '36%', display: 'flex', gap: 18, animation: 'cl2 46s linear infinite', opacity: isNight?0.06:isDusk?0.62:0.32 }}>
-          {[68,54,80,60,72,58,76,64,70].map((w,i) => <CloudBlob key={i} w={w} tint={cloudTint} />)}
-        </div>
-
-        {/* Cloud layer 1 — near, fast */}
-        <div style={{ position: 'absolute', top: '54%', display: 'flex', gap: 14, animation: 'cl1 26s linear infinite', opacity: isNight?0.04:isDusk?0.48:0.18 }}>
-          {[88,70,100,78,92,74,96,82,86].map((w,i) => <CloudBlob key={i} w={w} tint={cloudTint} />)}
-        </div>
-
-        {/* Glass reflection shimmer */}
-        <div style={{
-          position: 'absolute', top: '-15%', left: '-8%',
-          width: '38%', height: '65%', borderRadius: '50%',
-          background: 'rgba(255,255,255,0.04)',
-          transform: 'rotate(-22deg)',
-          animation: 'glassShimmer 7s ease-in-out infinite',
-          pointerEvents: 'none',
-        }} />
-
-        {/* Wing tip */}
-        <div style={{
-          position: 'absolute', bottom: '4%', right: '6%',
-          width: 68, height: 18,
-          background: 'linear-gradient(135deg,rgba(195,200,212,0.82) 0%,rgba(155,162,178,0.65) 100%)',
-          borderRadius: '5px 2px 10px 2px',
-          boxShadow: 'inset 0 2px 4px rgba(255,255,255,0.12), 0 2px 8px rgba(0,0,0,0.3)',
-          transform: 'perspective(50px) rotateX(10deg)',
-        }} />
-
-        {/* Progress text */}
-        <div style={{ position: 'absolute', bottom: 8, left: '50%', transform: 'translateX(-50%)', fontSize: 10, color: 'rgba(255,255,255,0.35)', whiteSpace: 'nowrap' }}>
-          {Math.round(progress)}% of journey
-        </div>
       </div>
     </div>
   )
@@ -972,13 +950,46 @@ function CandleScene({ progress }: { progress: number }) {
         boxShadow: '0 4px 12px rgba(0,0,0,0.6)',
       }} />
 
-      {/* Wax pool */}
+      {/* Wax pool — outer soft halo */}
+      <div style={{
+        position: 'absolute', bottom: 6, left: '50%', transform: 'translateX(-50%)',
+        width: Math.min(80, 36 + progress * 0.44), height: Math.min(16, 6 + progress * 0.1),
+        borderRadius: '50%',
+        background: 'rgba(245,238,220,0.32)',
+        filter: 'blur(5px)',
+        transition: 'width 14s ease, height 14s ease',
+      }} />
+      {/* Wax pool — solid puddle */}
       <div style={{
         position: 'absolute', bottom: 7, left: '50%', transform: 'translateX(-50%)',
-        width: Math.min(58, 28 + progress * 0.3), height: 7, borderRadius: '50%',
-        background: 'rgba(245,235,215,0.52)', filter: 'blur(1px)',
-        transition: 'width 12s ease',
+        width: Math.min(64, 26 + progress * 0.38), height: Math.min(13, 5 + progress * 0.08),
+        borderRadius: '50%',
+        background: 'linear-gradient(180deg,rgba(252,248,238,0.92) 0%,rgba(238,228,205,0.85) 100%)',
+        boxShadow: 'inset 0 -2px 4px rgba(0,0,0,0.08)',
+        transition: 'width 14s ease, height 14s ease',
       }} />
+      {/* Wax blob left drip solidified */}
+      {progress > 20 && (
+        <div style={{
+          position: 'absolute', bottom: 7, left: `calc(50% - ${Math.min(28, 10 + progress * 0.18)}px)`,
+          width: Math.min(16, 4 + progress * 0.12), height: Math.min(10, 3 + progress * 0.07),
+          borderRadius: '50%',
+          background: 'rgba(245,238,218,0.75)',
+          filter: 'blur(1px)',
+          transition: 'all 12s ease',
+        }} />
+      )}
+      {/* Wax blob right drip solidified */}
+      {progress > 35 && (
+        <div style={{
+          position: 'absolute', bottom: 7, right: `calc(50% - ${Math.min(26, 8 + progress * 0.16)}px)`,
+          width: Math.min(14, 3 + progress * 0.1), height: Math.min(8, 2 + progress * 0.06),
+          borderRadius: '50%',
+          background: 'rgba(245,238,218,0.7)',
+          filter: 'blur(1px)',
+          transition: 'all 12s ease',
+        }} />
+      )}
 
       {/* Candle body — flame lives inside as overflow:visible children */}
       <div style={{
@@ -998,11 +1009,21 @@ function CandleScene({ progress }: { progress: number }) {
         <div style={{ position: 'absolute', top: 0, left: 4, width: 7, borderRadius: '0 0 4px 4px', background: 'rgba(240,232,210,0.85)', animation: 'waxDrip1 9s ease-in-out infinite', animationDelay: '1.5s' }} />
         <div style={{ position: 'absolute', top: 0, right: 6, width: 5, borderRadius: '0 0 3px 3px', background: 'rgba(240,232,210,0.8)', animation: 'waxDrip2 13s ease-in-out infinite', animationDelay: '5s' }} />
 
+        {/* Liquid wax pool on top of candle */}
+        <div style={{
+          position: 'absolute', top: -4, left: '50%', transform: 'translateX(-50%)',
+          width: Math.min(28, 18 + progress * 0.1), height: 6,
+          borderRadius: '50%',
+          background: 'radial-gradient(ellipse,rgba(255,252,240,0.95) 0%,rgba(240,232,210,0.8) 100%)',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+          transition: 'width 15s ease',
+          zIndex: 1,
+        }} />
         {/* Wick — sits above candle top */}
         <div style={{
           position: 'absolute', top: -10, left: '50%', transform: 'translateX(-50%)',
           width: 2, height: 10, borderRadius: 1,
-          background: 'linear-gradient(180deg,#666 0%,#222 100%)',
+          background: 'linear-gradient(180deg,#555 0%,#1a1a1a 100%)',
           zIndex: 2,
         }} />
 

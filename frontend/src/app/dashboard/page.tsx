@@ -100,16 +100,6 @@ export default function Dashboard() {
   const [blockQueue, setBlockQueue] = useState<Task[]>([])
   const [dragSrcIdx, setDragSrcIdx] = useState<number | null>(null)
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null)
-  const [showEOD, setShowEOD] = useState(false)
-  const [eodChecked, setEodChecked] = useState<Set<string>>(new Set())
-  const [eodNotes, setEodNotes] = useState('')
-  const [eodSubmitting, setEodSubmitting] = useState(false)
-  const [eodStep, setEodStep] = useState<'checkin' | 'preview'>('checkin')
-  const [eodPreviewSummary, setEodPreviewSummary] = useState('')
-  const [eodPreviewDirectives, setEodPreviewDirectives] = useState<any>(null)
-  const [eodOverflowCourses, setEodOverflowCourses] = useState<string[]>([])
-  const [eodMergeSuggestions, setEodMergeSuggestions] = useState<any[]>([])
-  const [eodOverflowStrategy, setEodOverflowStrategy] = useState<'merge' | 'defer' | 'keep_all'>('defer')
   const [courses, setCourses] = useState<Course[]>([])
   const [deletingCourseId, setDeletingCourseId] = useState<string | null>(null)
   const [todayTasks, setTodayTasks] = useState<Task[]>([])
@@ -603,15 +593,10 @@ export default function Dashboard() {
                     )}
                   </div>
                   <div className="flex items-center gap-2">
-                    <button onClick={() => { setEodChecked(new Set(todayTasks.filter(t => t.status === 'done').map(t => t.id))); setShowEOD(true) }}
-                      className="rounded px-2.5 py-1 text-xs font-medium transition hover:bg-[#EFEFED]"
-                      style={{ border: `1px solid ${NOTION.border}`, color: NOTION.text }}>
-                      📋 End of day
-                    </button>
                     <button onClick={() => setShowRescheduleModal(true)}
                       className="rounded px-2.5 py-1 text-xs font-medium transition hover:bg-[#EFEFED]"
                       style={{ border: `1px solid ${NOTION.border}`, color: NOTION.text }}>
-                      ↺ Regenerate
+                      ↺ Reschedule
                     </button>
                     <Link href="/calendar" className="text-sm" style={{ color: NOTION.muted }}>Full calendar →</Link>
                   </div>
@@ -988,196 +973,10 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ── End of day modal ── */}
-      {showEOD && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-xl p-6 shadow-xl" style={{ backgroundColor: NOTION.bg, border: `1px solid ${NOTION.border}` }}>
-
-            {eodStep === 'checkin' ? (
-              <>
-                <h2 className="mb-1 text-lg font-semibold" style={{ color: NOTION.text }}>End of day check-in</h2>
-                <p className="mb-4 text-sm" style={{ color: NOTION.muted }}>
-                  Tick what you actually completed today. Claude will review the rest and suggest a plan for tomorrow.
-                </p>
-
-                <div className="mb-4 max-h-64 overflow-y-auto space-y-1">
-                  {todayTasks.map(task => (
-                    <label key={task.id} className="flex cursor-pointer items-start gap-3 rounded px-3 py-2 transition hover:bg-[#EFEFED]">
-                      <input type="checkbox"
-                        checked={eodChecked.has(task.id)}
-                        onChange={e => setEodChecked(prev => {
-                          const next = new Set(prev)
-                          e.target.checked ? next.add(task.id) : next.delete(task.id)
-                          return next
-                        })}
-                        className="mt-0.5 h-4 w-4 shrink-0 accent-gray-800"
-                      />
-                      <div className="min-w-0">
-                        <div className="text-sm" style={{ color: NOTION.text }}>{task.title}</div>
-                        <div className="text-xs" style={{ color: task.courses?.color }}>{task.courses?.name} · {task.estimated_minutes}m</div>
-                      </div>
-                    </label>
-                  ))}
-                </div>
-
-                <textarea rows={2} value={eodNotes} onChange={e => setEodNotes(e.target.value)}
-                  placeholder="Anything to note? e.g. ran out of time, topic was harder than expected…"
-                  className="mb-4 w-full resize-none rounded px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none"
-                  style={{ border: `1px solid ${NOTION.border}`, backgroundColor: '#FAFAF9' }} />
-
-                <div className="flex items-center justify-between">
-                  <span className="text-xs" style={{ color: NOTION.muted }}>
-                    {eodChecked.size} / {todayTasks.length} completed
-                  </span>
-                  <div className="flex gap-2">
-                    <button onClick={() => { setShowEOD(false); setEodStep('checkin'); setEodNotes(''); setEodChecked(new Set()) }}
-                      className="rounded px-4 py-2 text-sm transition hover:bg-[#EFEFED]" style={{ color: NOTION.muted }}>
-                      Cancel
-                    </button>
-                    <button
-                      disabled={eodSubmitting}
-                      onClick={async () => {
-                        if (!userId) return
-                        setEodSubmitting(true)
-                        try {
-                          // Mark checked tasks as done, reset unchecked in_progress → todo
-                          const toMarkDone = todayTasks.filter(t => eodChecked.has(t.id) && t.status !== 'done')
-                          const toResetTodo = todayTasks.filter(t => !eodChecked.has(t.id) && t.status === 'in_progress')
-                          await Promise.all([
-                            ...toMarkDone.map(t => api.updateTaskStatus(t.id, 'done')),
-                            ...toResetTodo.map(t => api.updateTaskStatus(t.id, 'todo')),
-                          ])
-                          // Build feedback for Claude preview
-                          const completed = todayTasks.filter(t => eodChecked.has(t.id)).map(t => t.title)
-                          const missed = todayTasks.filter(t => !eodChecked.has(t.id)).map(t => t.title)
-                          const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1)
-                          const tomorrowStr = tomorrow.toISOString().split('T')[0]
-                          const feedback = [
-                            `Start scheduling from ${tomorrowStr} (today's session is over).`,
-                            completed.length ? `Completed today: ${completed.join(', ')}.` : 'Did not complete any tasks today.',
-                            missed.length ? `Did not finish: ${missed.join(', ')}. Work these into the plan from tomorrow.` : '',
-                            eodNotes ? `Student notes: ${eodNotes}` : '',
-                          ].filter(Boolean).join(' ')
-                          // Get Claude's preview before applying
-                          const result = await api.reschedulePreview(userId, feedback, { interleave_courses: rescheduleInterleave })
-                          setEodPreviewSummary(result.summary)
-                          setEodPreviewDirectives(result.directives)
-                          setEodOverflowCourses(result.overflow_courses || [])
-                          setEodMergeSuggestions(result.merge_suggestions || [])
-                          setEodOverflowStrategy(result.merge_suggestions?.length > 0 ? 'merge' : 'defer')
-                          setEodStep('preview')
-                        } catch (e) { console.error(e) }
-                        finally { setEodSubmitting(false) }
-                      }}
-                      className="rounded px-4 py-2 text-sm font-medium text-white transition disabled:opacity-50"
-                      style={{ backgroundColor: NOTION.text }}>
-                      {eodSubmitting ? 'Analysing…' : 'See Claude\'s plan →'}
-                    </button>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <>
-                <h2 className="mb-1 text-lg font-semibold" style={{ color: NOTION.text }}>Tomorrow's plan</h2>
-                <div className="mb-4 mt-2 rounded-lg p-4 text-sm leading-relaxed" style={{ backgroundColor: '#FAFAF9', border: `1px solid ${NOTION.border}`, color: NOTION.text }}>
-                  {eodPreviewSummary}
-                </div>
-
-                {/* Overflow warning */}
-                {eodOverflowCourses.length > 0 && (
-                  <div className="mb-4 rounded-lg p-4 text-sm" style={{ backgroundColor: '#FFF7ED', border: '1px solid #FED7AA' }}>
-                    <p className="mb-2 font-medium" style={{ color: '#92400E' }}>
-                      ⚠️ Too many tasks for the time available
-                    </p>
-                    <p className="mb-3 text-xs" style={{ color: '#B45309' }}>
-                      {eodOverflowCourses.join(', ')} {eodOverflowCourses.length === 1 ? 'has' : 'have'} more tasks than your daily limit allows. What should Claude do?
-                    </p>
-                    <div className="space-y-2">
-                      {eodMergeSuggestions.length > 0 && (
-                        <label className="flex cursor-pointer items-start gap-2">
-                          <input type="radio" name="eod-overflow" value="merge" checked={eodOverflowStrategy === 'merge'} onChange={() => setEodOverflowStrategy('merge')} className="mt-0.5" />
-                          <div>
-                            <span className="font-medium" style={{ color: '#92400E' }}>Combine similar tasks</span>
-                            <ul className="mt-1 space-y-0.5 text-xs" style={{ color: '#B45309' }}>
-                              {eodMergeSuggestions.map((m: any, i: number) => (
-                                <li key={i}>• {m.source_titles.join(' + ')} → <span className="font-medium">{m.merged_title}</span> ({m.estimated_minutes}min)</li>
-                              ))}
-                            </ul>
-                          </div>
-                        </label>
-                      )}
-                      <label className="flex cursor-pointer items-center gap-2">
-                        <input type="radio" name="eod-overflow" value="defer" checked={eodOverflowStrategy === 'defer'} onChange={() => setEodOverflowStrategy('defer')} />
-                        <span style={{ color: '#92400E' }}>Defer low-priority tasks to after the exam</span>
-                      </label>
-                      <label className="flex cursor-pointer items-center gap-2">
-                        <input type="radio" name="eod-overflow" value="keep_all" checked={eodOverflowStrategy === 'keep_all'} onChange={() => setEodOverflowStrategy('keep_all')} />
-                        <span style={{ color: '#92400E' }}>Keep all tasks (some will appear after exam date)</span>
-                      </label>
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex justify-end gap-2">
-                  <button onClick={() => { setEodStep('checkin'); setEodPreviewSummary(''); setEodPreviewDirectives(null); setEodOverflowCourses([]); setEodMergeSuggestions([]) }}
-                    className="rounded px-4 py-2 text-sm transition hover:bg-[#EFEFED]" style={{ color: NOTION.muted }}>
-                    ← Back
-                  </button>
-                  <button
-                    disabled={eodSubmitting}
-                    onClick={async () => {
-                      if (!userId) return
-                      setEodSubmitting(true)
-                      try {
-                        const completed = todayTasks.filter(t => eodChecked.has(t.id)).map(t => t.title)
-                        const missed = todayTasks.filter(t => !eodChecked.has(t.id)).map(t => t.title)
-                        const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1)
-                        const tomorrowStr = tomorrow.toISOString().split('T')[0]
-                        const feedback = [
-                          `Start scheduling from ${tomorrowStr} (today's session is over).`,
-                          completed.length ? `Completed today: ${completed.join(', ')}.` : 'Did not complete any tasks today.',
-                          missed.length ? `Did not finish: ${missed.join(', ')}. Work these into the plan from tomorrow.` : '',
-                          eodNotes ? `Student notes: ${eodNotes}` : '',
-                        ].filter(Boolean).join(' ')
-                        await api.fullReschedule(userId, feedback, {
-                          interleave_courses: rescheduleInterleave,
-                          directives: eodPreviewDirectives,
-                          overflow_strategy: eodOverflowStrategy,
-                        })
-                        const [plan, statsData] = await Promise.all([
-                          api.getTodayPlan(userId).catch(() => ({ tasks: [] })),
-                          api.getStats(userId).catch(() => null),
-                        ])
-                        setTodayTasks(plan.tasks || [])
-                        setStats(statsData)
-                        setShowEOD(false)
-                        setEodStep('checkin')
-                        setEodNotes('')
-                        setEodChecked(new Set())
-                        setEodPreviewSummary('')
-                        setEodPreviewDirectives(null)
-                        setEodOverflowCourses([])
-                        setEodMergeSuggestions([])
-                        setRescheduleSuccess(true)
-                        setTimeout(() => setRescheduleSuccess(false), 4000)
-                      } catch (e) { console.error(e) }
-                      finally { setEodSubmitting(false) }
-                    }}
-                    className="rounded px-4 py-2 text-sm font-medium text-white transition disabled:opacity-50"
-                    style={{ backgroundColor: NOTION.text }}>
-                    {eodSubmitting ? 'Applying…' : 'Apply plan ✓'}
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* ── Reschedule modal ── */}
       {showRescheduleModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-xl p-6 shadow-xl" style={{ backgroundColor: NOTION.bg, border: `1px solid ${NOTION.border}` }}>
+          <div className="w-full max-w-md rounded-xl p-6 shadow-xl overflow-y-auto" style={{ backgroundColor: NOTION.bg, border: `1px solid ${NOTION.border}`, maxHeight: '90vh' }}>
             <h2 className="mb-1 text-lg font-semibold" style={{ color: NOTION.text }}>
               {previewSummary ? 'Confirm reschedule' : 'Reschedule'}
             </h2>

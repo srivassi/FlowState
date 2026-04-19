@@ -66,6 +66,7 @@ def get_todays_tasks(user_id: str):
         .select("*, courses(title, color, exam_date)")
         .eq("user_id", user_id)
         .eq("scheduled_date", today)
+        .neq("status", "done")
         .order("order_index")
         .execute()
     )

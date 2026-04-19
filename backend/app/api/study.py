@@ -121,10 +121,11 @@ def complete_pomodoro(body: PomodoroComplete):
 
     session = result.data[0]
 
-    # Mark task done
+    # Mark task done and move to today so it no longer appears on future calendar days
     supabase.table("tasks").update({
         "status": "done",
         "completed_at": datetime.utcnow().isoformat(),
+        "scheduled_date": date.today().isoformat(),
     }).eq("id", session["task_id"]).execute()
 
     return session
@@ -156,6 +157,7 @@ def get_today_plan(user_id: str):
         .select("*, courses(title, color, exam_date)")
         .eq("user_id", user_id)
         .eq("scheduled_date", today)
+        .neq("status", "done")
         .order("order_index")
         .execute()
     )
@@ -294,7 +296,7 @@ def _load_reschedule_context(user_id: str, sessions_per_day_override=None):
     for course in course_map.values():
         tasks = supabase.table("tasks").select("*").eq("course_id", course["id"]).execute().data or []
         for t in tasks:
-            if t.get("status") not in ("done", "completed"):
+            if t.get("status") not in ("done", "completed", "in_progress"):
                 t["_exam_date"] = course["exam_date"]
                 tasks_by_course[course["id"]].append(t)
         tasks_by_course[course["id"]].sort(
@@ -332,7 +334,7 @@ def _build_claude_prompt(ctx: dict, feedback: str, interleave_courses: bool = Tr
     task_lines = []
     for cid, tasks in ctx["tasks_by_course"].items():
         cname = ctx["course_map"][cid].get("title", cid)
-        for t in tasks[:30]:
+        for t in tasks:
             task_lines.append(
                 f"  [{cname}][{t.get('priority','medium')}] {t['title']} ({t['estimated_minutes']}m)"
             )
@@ -353,16 +355,15 @@ REMAINING TASKS (up to 30 per course):
 
 USER FEEDBACK: "{feedback or 'None — replan intelligently based on time pressure above.'}"
 
-IMPORTANT CONSTRAINT: The student cannot study more than {ctx['base_ppd']} tasks/day — this is a hard limit based on their available hours. Do NOT suggest increasing tasks_per_day beyond this number. The student cannot manufacture extra time.
+BASE LOAD: The student's normal capacity is {ctx['base_ppd']} tasks/day. For courses that are tight or overflowing, you may recommend up to {min(ctx['base_ppd'] * 2, 12)} tasks/day for that course specifically — but only if they genuinely cannot fit otherwise. Don't inflate unnecessarily.
 
 Your job:
 1. Identify which courses are time-critical (tight or overflowing).
 2. For tight/overflowing courses, reorder tasks so the highest-priority ones come first — the student should complete what matters most before the exam.
-3. For courses that cannot fit all tasks within the hard limit before the exam, identify overflow tasks (low-priority ones that won't fit) and:
+3. For courses that cannot fit all tasks even at the elevated rate, identify overflow tasks (low-priority ones that won't fit) and:
    a. Suggest merging similar/related tasks where it makes sense (e.g. two short "Read ChX" tasks → one combined task). Be specific — only suggest merges that genuinely save time.
    b. Flag which tasks should be deferred if the student chooses not to merge.
-4. Do NOT increase tasks_per_day beyond {ctx['base_ppd']}.
-5. Honour the user's feedback if given.
+4. Honour the user's feedback if given.
 
 Return a JSON object with these fields:
 - "start_date": ISO date string (today unless user said otherwise)
@@ -395,8 +396,8 @@ def _apply_directives(directives: dict, ctx: dict):
     for cname, ppd in tpd_map.items():
         cid = name_to_id.get(cname)
         if cid:
-            # Hard cap at the user's base tasks/day — cannot exceed their available hours
-            tasks_per_day_override[cid] = min(max(1, int(ppd)), ctx["base_ppd"])
+            # Allow up to 2× base_ppd for overflow courses, absolute ceiling 12
+            tasks_per_day_override[cid] = min(max(1, int(ppd)), max(ctx["base_ppd"] * 2, 12))
 
     order_map = directives.get("task_order_per_course", {})
     for cname, ordered_titles in order_map.items():
@@ -459,7 +460,7 @@ def reschedule_preview(body: FullRescheduleRequest):
         client = _anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
         prompt = _build_claude_prompt(ctx, body.feedback or "", body.interleave_courses)
         msg = client.messages.create(
-            model="claude-opus-4-6",
+            model="claude-opus-4-7",
             max_tokens=8000,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -505,7 +506,7 @@ def full_reschedule(body: FullRescheduleRequest):
             client = _anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
             prompt = _build_claude_prompt(ctx, body.feedback or "", body.interleave_courses)
             msg = client.messages.create(
-                model="claude-opus-4-6",
+                model="claude-opus-4-7",
                 max_tokens=8000,
                 messages=[{"role": "user", "content": prompt}],
             )

@@ -2,12 +2,11 @@
 
 export const dynamic = 'force-dynamic'
 
-import React, { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { api } from '../../../lib/api'
-import katex from 'katex'
-import 'katex/dist/katex.min.css'
+import { renderNote } from '../../../lib/noteRenderer'
 
 const N = {
   bg: '#FFFFFF', sidebar: '#FBFBFA', border: '#EDEDED',
@@ -20,94 +19,6 @@ type Message = { role: 'user' | 'assistant'; content: string }
 type TopicState = { topic: Topic; messages: Message[]; stars: number | null }
 type Phase = 'loading' | 'active' | 'finished'
 
-function renderKatex(latex: string, display: boolean): React.ReactNode {
-  try {
-    const html = katex.renderToString(latex, { displayMode: display, throwOnError: false })
-    return <span dangerouslySetInnerHTML={{ __html: html }} style={display ? { display: 'block', overflowX: 'auto', margin: '6px 0' } : undefined} />
-  } catch {
-    return <span>{display ? `$$${latex}$$` : `$${latex}$`}</span>
-  }
-}
-
-function inlineStyle(text: string): React.ReactNode {
-  const parts: React.ReactNode[] = []
-  const re = /(\$\$(.+?)\$\$|\$([^$\n]+?)\$|\*\*(.+?)\*\*|`(.+?)`)/g
-  let last = 0; let key = 0; let m
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last) parts.push(<span key={key++}>{text.slice(last, m.index)}</span>)
-    if (m[2] !== undefined) parts.push(<span key={key++}>{renderKatex(m[2], true)}</span>)
-    else if (m[3] !== undefined) parts.push(<span key={key++}>{renderKatex(m[3], false)}</span>)
-    else if (m[4] !== undefined) parts.push(<strong key={key++}>{m[4]}</strong>)
-    else parts.push(<code key={key++} style={{ background: 'rgba(55,53,47,0.08)', borderRadius: 3, padding: '1px 4px', fontFamily: 'monospace', fontSize: '0.88em' }}>{m[5]}</code>)
-    last = m.index + m[0].length
-  }
-  if (last < text.length) parts.push(<span key={key++}>{text.slice(last)}</span>)
-  return <>{parts}</>
-}
-
-function renderMsg(text: string) {
-  const nodes: React.ReactNode[] = []
-  let listItems: string[] = []
-  let key = 0
-
-  const flushList = () => {
-    if (!listItems.length) return
-    nodes.push(
-      <ul key={`list-${key++}`} style={{ paddingLeft: 16, margin: '4px 0', listStyle: 'none' }}>
-        {listItems.map((li, i) => (
-          <li key={i} style={{ display: 'flex', gap: 6, marginBottom: 2 }}>
-            <span style={{ opacity: 0.5, flexShrink: 0 }}>•</span>
-            <span>{inlineStyle(li)}</span>
-          </li>
-        ))}
-      </ul>
-    )
-    listItems = []
-  }
-
-  // Split into segments: fenced code blocks vs normal lines
-  const fenceRe = /^```(\w*)\n([\s\S]*?)```$/gm
-  let cursor = 0
-  let fm: RegExpExecArray | null
-
-  const processLines = (chunk: string) => {
-    chunk.split('\n').forEach((line) => {
-      // Block math $$...$$ on its own line
-      const blockMath = line.match(/^\s*\$\$(.+?)\$\$\s*$/)
-      if (blockMath) {
-        flushList()
-        nodes.push(<div key={`bm-${key++}`}>{renderKatex(blockMath[1], true)}</div>)
-        return
-      }
-      const isBullet = /^\s*[-•*]\s/.test(line)
-      if (isBullet) { listItems.push(line.replace(/^\s*[-•*]\s/, '')); return }
-      flushList()
-      if (line.trim() === '') nodes.push(<div key={`br-${key++}`} style={{ height: 6 }} />)
-      else nodes.push(<div key={`l-${key++}`}>{inlineStyle(line)}</div>)
-    })
-  }
-
-  while ((fm = fenceRe.exec(text)) !== null) {
-    if (fm.index > cursor) processLines(text.slice(cursor, fm.index))
-    flushList()
-    const lang = fm[1] || ''
-    const code = fm[2]
-    nodes.push(
-      <pre key={`code-${key++}`} style={{
-        background: 'rgba(55,53,47,0.06)', borderRadius: 6, padding: '10px 14px',
-        fontFamily: 'monospace', fontSize: '0.85em', overflowX: 'auto',
-        margin: '6px 0', whiteSpace: 'pre',
-      }}>
-        {lang && <div style={{ opacity: 0.4, fontSize: '0.8em', marginBottom: 4 }}>{lang}</div>}
-        <code>{code}</code>
-      </pre>
-    )
-    cursor = fm.index + fm[0].length
-  }
-  if (cursor < text.length) processLines(text.slice(cursor))
-  flushList()
-  return <>{nodes}</>
-}
 
 const STAR_META: Record<number, { label: string; color: string; bg: string }> = {
   1: { label: 'Getting there',  color: '#DC2626', bg: '#FEF2F2' },
@@ -366,7 +277,7 @@ export default function GauntletPage() {
               style={m.role === 'user'
                 ? { backgroundColor: N.indigo, color: '#fff', borderBottomRightRadius: 4 }
                 : { backgroundColor: N.bg, color: N.text, borderBottomLeftRadius: 4, border: `1px solid ${N.border}` }}>
-              {m.role === 'assistant' ? renderMsg(m.content) : m.content}
+              {m.role === 'assistant' ? renderNote(m.content) : m.content}
             </div>
           </div>
         ))}

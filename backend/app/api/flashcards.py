@@ -158,8 +158,8 @@ def generate_flashcards(
     if not pdf_text.strip():
         raise HTTPException(status_code=400, detail="No text could be extracted from the PDF")
 
-    # Truncate to ~12k chars to fit context
-    pdf_text = pdf_text[:12000]
+    # Truncate to ~100k chars to fit context
+    pdf_text = pdf_text[:100000]
 
     # Generate flashcards with Claude
     client = anthropic.Anthropic(api_key=api_key)
@@ -174,7 +174,7 @@ def generate_flashcards(
         + instruction_block +
         "\nReturn ONLY a JSON array (no markdown, no extra text) where each element has:\n"
         '  { "question": "...", "answer": "..." }\n\n'
-        "Aim for 10-20 cards. Questions should test understanding, not just recall.\n\n"
+        "Generate as many cards as needed to cover all key concepts in the material. Questions should test understanding, not just recall.\n\n"
         f"Course material:\n{pdf_text}"
     )
 

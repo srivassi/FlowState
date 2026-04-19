@@ -84,8 +84,6 @@ export default function Dashboard() {
   const router = useRouter()
   const [userId, setUserId] = useState<string | null>(null)
   const [userName, setUserName] = useState<string>('')
-  const [editingName, setEditingName] = useState(false)
-  const [nameInput, setNameInput] = useState('')
   const [showRescheduleModal, setShowRescheduleModal] = useState(false)
   const [rescheduleFeedback, setRescheduleFeedback] = useState('')
   const [rescheduling, setRescheduling] = useState(false)
@@ -203,13 +201,6 @@ export default function Dashboard() {
   const handleSignOut = async () => {
     await supabase.auth.signOut()
     router.push('/auth/signin')
-  }
-
-  const handleSaveName = async () => {
-    if (!nameInput.trim()) return
-    await supabase.auth.updateUser({ data: { full_name: nameInput.trim() } })
-    setUserName(nameInput.trim())
-    setEditingName(false)
   }
 
   const loadCourse = async (course: Course) => {
@@ -507,40 +498,25 @@ export default function Dashboard() {
 
         {/* Profile + sign out */}
         <div className="mt-auto border-t p-3" style={{ borderColor: NOTION.border }}>
-          {editingName ? (
-            <div className="flex items-center gap-1">
-              <input
-                autoFocus
-                value={nameInput}
-                onChange={e => setNameInput(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') handleSaveName(); if (e.key === 'Escape') setEditingName(false) }}
-                className="flex-1 rounded border px-2 py-1 text-xs text-gray-900 bg-white"
-                style={{ borderColor: NOTION.border }}
-                placeholder="Your name"
-              />
-              <button onClick={handleSaveName} className="text-xs px-2 py-1 rounded" style={{ backgroundColor: NOTION.hover, color: NOTION.text }}>Save</button>
-            </div>
-          ) : (
-            <div className="flex items-center justify-between">
-              <button
-                onClick={() => { setNameInput(userName); setEditingName(true) }}
-                className="flex items-center gap-2 text-xs rounded px-2 py-1 hover:bg-[#EFEFED] transition-colors"
-                style={{ color: NOTION.text }}
-                title="Edit name"
-              >
-                <span className="text-base">👤</span>
-                <span className="truncate max-w-25">{userName || 'Set your name'}</span>
-              </button>
-              <button
-                onClick={handleSignOut}
-                className="text-xs rounded px-2 py-1 hover:bg-[#EFEFED] transition-colors"
-                style={{ color: NOTION.muted }}
-                title="Sign out"
-              >
-                Sign out
-              </button>
-            </div>
-          )}
+          <div className="flex items-center justify-between">
+            <button
+              onClick={() => router.push('/settings')}
+              className="flex items-center gap-2 text-xs rounded px-2 py-1 hover:bg-[#EFEFED] transition-colors"
+              style={{ color: NOTION.text }}
+              title="Settings"
+            >
+              <span className="text-base">👤</span>
+              <span className="truncate max-w-25">{userName || 'Set your name'}</span>
+            </button>
+            <button
+              onClick={handleSignOut}
+              className="text-xs rounded px-2 py-1 hover:bg-[#EFEFED] transition-colors"
+              style={{ color: NOTION.muted }}
+              title="Sign out"
+            >
+              Sign out
+            </button>
+          </div>
         </div>
       </div>
 

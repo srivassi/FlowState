@@ -191,7 +191,7 @@ function WhiteboardInner() {
 
   const [notes, setNotes] = useState<StickyNote[]>([])
   const activeNotes = useMemo(
-    () => notes.filter(n => n.page_id === activePageId),
+    () => notes.filter(n => n.page_id === activePageId && !n.minimised),
     [notes, activePageId]
   )
 
@@ -779,37 +779,56 @@ function WhiteboardInner() {
                       onClick={tidyNotes}
                       className="rounded px-1.5 py-0.5 text-xs transition hover:bg-[#EFEFED]"
                       style={{ color: 'rgba(55,53,47,0.5)' }}
-                      title="Tidy notes into a grid">
+                      title="Dock all notes to sidebar">
                       ⊞
                     </button>
                     <button
                       onClick={toggleMinimiseAll}
                       className="rounded px-1.5 py-0.5 text-xs transition hover:bg-[#EFEFED]"
                       style={{ color: 'rgba(55,53,47,0.5)' }}
-                      title={allMinimised ? 'Expand all' : 'Minimise all'}>
+                      title={allMinimised ? 'Restore all to canvas' : 'Dock all to sidebar'}>
                       {allMinimised ? '▼' : '▲'}
                     </button>
                   </div>
                 </div>
-                <div className="overflow-y-auto" style={{ maxHeight: 200, minWidth: 220 }}>
-                  {pageNotes.map(note => (
-                    <button
-                      key={note.id}
-                      onClick={() => note.minimised ? restoreNote(note.id) : (() => { setActiveNote(note.id); document.getElementById(`note-${note.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }) })()}
-                      className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-[#EFEFED]"
-                      style={{ color: note.minimised ? '#37352F' : 'rgba(55,53,47,0.6)' }}
-                      title={note.minimised ? 'Click to restore' : 'Click to focus'}>
-                      <span className="shrink-0 text-xs">{note.type === 'text' ? '📝' : '💬'}</span>
-                      <span className="flex-1 truncate">{note.title || (note.type === 'text' ? 'Untitled note' : 'Note')}</span>
-                      {note.minimised && (
-                        <span className="shrink-0 rounded-full px-1.5 py-0.5 text-xs font-medium"
-                          style={{ backgroundColor: '#EEF2FF', color: '#6366F1', fontSize: 9 }}>
-                          min
-                        </span>
-                      )}
-                    </button>
-                  ))}
-                </div>
+
+                {/* Docked notes — shown as coloured chips */}
+                {pageNotes.some(n => n.minimised) && (
+                  <div className="px-2 pb-1" style={{ minWidth: 220 }}>
+                    <div className="px-1 pb-1 text-xs" style={{ color: 'rgba(55,53,47,0.35)', fontSize: 10, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                      Docked
+                    </div>
+                    {pageNotes.filter(n => n.minimised).map(note => (
+                      <button
+                        key={note.id}
+                        onClick={() => restoreNote(note.id)}
+                        className="w-full flex items-center gap-2 px-2 py-1.5 text-left text-xs rounded-lg mb-1 transition-all hover:brightness-95 active:scale-[0.98]"
+                        style={{ backgroundColor: note.color, color: '#37352F', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}
+                        title="Click to restore to canvas">
+                        <span className="shrink-0">{note.type === 'text' ? '📝' : '💬'}</span>
+                        <span className="flex-1 truncate font-medium">{note.title || (note.type === 'text' ? 'Untitled' : 'Note')}</span>
+                        <span className="shrink-0 text-xs" style={{ opacity: 0.5 }}>↑</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* On-canvas notes — listed below if any */}
+                {pageNotes.some(n => !n.minimised) && (
+                  <div className="overflow-y-auto" style={{ maxHeight: 140, minWidth: 220 }}>
+                    {pageNotes.filter(n => !n.minimised).map(note => (
+                      <button
+                        key={note.id}
+                        onClick={() => { setActiveNote(note.id); document.getElementById(`note-${note.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }) }}
+                        className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-[#EFEFED]"
+                        style={{ color: 'rgba(55,53,47,0.6)' }}
+                        title="Click to focus">
+                        <span className="shrink-0">{note.type === 'text' ? '📝' : '💬'}</span>
+                        <span className="flex-1 truncate">{note.title || (note.type === 'text' ? 'Untitled' : 'Note')}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 

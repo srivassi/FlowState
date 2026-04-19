@@ -181,7 +181,7 @@ def generate_flashcards(
 
     response = client.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=4096,
+        max_tokens=8096,
         messages=[{"role": "user", "content": prompt}],
     )
 
@@ -214,7 +214,7 @@ def generate_flashcards(
                 pass
 
     if cards is None:
-        raise HTTPException(status_code=500, detail="Claude returned invalid JSON")
+        raise HTTPException(status_code=500, detail=f"Claude returned invalid JSON. Raw (first 500 chars): {raw[:500]!r}")
 
     if not isinstance(cards, list):
         raise HTTPException(status_code=500, detail="Expected a JSON array from Claude")

@@ -1259,8 +1259,16 @@ function FocusInner() {
   const confirmBreak = async () => {
     // Complete the finished work session
     const curTask = blockTasks[blockIdx]
-    if (curTask?.sessionId) {
-      await api.completePomodoro(curTask.sessionId, undefined).catch(() => {})
+    let sid = curTask?.sessionId ?? null
+    // If startPomodoro failed earlier and we have no sessionId, create one now before completing
+    if (!sid && curTask && blockUserId) {
+      try {
+        const s = await api.startPomodoro({ task_id: curTask.id, user_id: blockUserId, duration_minutes: curTask.duration })
+        sid = s.id
+      } catch {}
+    }
+    if (sid) {
+      await api.completePomodoro(sid, undefined).catch(() => {})
     }
     // Last task — end the block, no break
     if (blockIdx + 1 >= blockTasks.length) {

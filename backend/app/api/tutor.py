@@ -48,6 +48,7 @@ def _fetch_pdf_text(pdf_url: str) -> str:
         return ""
     try:
         r = _requests.get(pdf_url, timeout=30)
+        r.raise_for_status()
         reader = pypdf.PdfReader(io.BytesIO(r.content))
         pages = [reader.pages[i].extract_text() or "" for i in range(len(reader.pages))]
         return "\n\n".join(f"[Page {i+1}]\n{t}" for i, t in enumerate(pages))
@@ -55,16 +56,39 @@ def _fetch_pdf_text(pdf_url: str) -> str:
         return ""
 
 
+def _has_enough_text(pdf_text: str, min_chars: int = 300) -> bool:
+    """Check that there is real content beyond page markers."""
+    stripped = re.sub(r'\[Page \d+\]', '', pdf_text).strip()
+    return len(stripped) >= min_chars
+
+
 def _extract_json(raw: str) -> dict:
-    cleaned = re.sub(r'```(?:json)?\s*', '', raw).strip()
+    # Remove opening and closing code fences
+    cleaned = re.sub(r'```(?:json)?\s*|\s*```', '', raw).strip()
     try:
-        return json.loads(cleaned)
+        parsed = json.loads(cleaned)
+        if isinstance(parsed, dict):
+            return parsed
+        if isinstance(parsed, list):
+            return {"topics": parsed}
     except json.JSONDecodeError:
         pass
+    # Fallback: find the outermost {...}
     m = re.search(r'\{[\s\S]*\}', cleaned)
     if m:
         try:
-            return json.loads(m.group(0))
+            parsed = json.loads(m.group(0))
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+    # Fallback: find a top-level [...] array
+    m2 = re.search(r'\[[\s\S]*\]', cleaned)
+    if m2:
+        try:
+            parsed = json.loads(m2.group(0))
+            if isinstance(parsed, list):
+                return {"topics": parsed}
         except json.JSONDecodeError:
             pass
     return {}
@@ -80,7 +104,9 @@ def start_gauntlet(body: StartRequest):
 
     pdf_text = _fetch_pdf_text(body.pdf_url)
     if not pdf_text.strip():
-        raise HTTPException(status_code=400, detail="Could not extract text from PDF. Make sure it is not a scanned image-only PDF.")
+        raise HTTPException(status_code=400, detail="Could not extract text from this PDF. Make sure it is not a scanned image-only PDF.")
+    if not _has_enough_text(pdf_text):
+        raise HTTPException(status_code=400, detail="Not enough readable text in this PDF. It may be a scanned or image-based document.")
 
     client = anthropic.Anthropic(api_key=api_key)
 
@@ -91,7 +117,7 @@ PDF CONTENT (may be truncated):
 
 Extract the key topics from this material. Each topic should be a coherent concept or section that can be taught and tested in 2-4 exchanges.
 
-Return a JSON object with this structure:
+Return ONLY a valid JSON object with this exact structure, no other text:
 {{
   "topics": [
     {{
@@ -103,18 +129,21 @@ Return a JSON object with this structure:
   ]
 }}
 
-Aim for 4-8 topics. If the PDF is short, fewer is fine. Only return valid JSON."""
+Aim for 4-8 topics. If the PDF is short, fewer is fine."""
 
-    msg = client.messages.create(
-        model="claude-opus-4-6",
-        max_tokens=2000,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    result = _extract_json(msg.content[0].text)
-    topics = result.get("topics", [])
+    try:
+        msg = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        result = _extract_json(msg.content[0].text)
+        topics = result.get("topics", [])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI topic extraction failed: {str(e)}")
 
     if not topics:
-        raise HTTPException(status_code=500, detail="Could not extract topics from this PDF.")
+        raise HTTPException(status_code=500, detail="Could not extract topics from this PDF. The content may be too short or unclear.")
 
     return {"topics": topics, "pdf_text": pdf_text[:40000]}
 
@@ -171,7 +200,7 @@ IMPORTANT: Only include the JSON line when you are actually moving to the next t
     messages = [*body.messages, {"role": "user", "content": body.user_message}]
 
     response = client.messages.create(
-        model="claude-opus-4-6",
+        model="claude-sonnet-4-6",
         max_tokens=1024,
         system=system,
         messages=messages,

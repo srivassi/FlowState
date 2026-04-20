@@ -172,7 +172,8 @@ Aim for 4-8 topics. If the PDF is short, fewer is fine."""
         raise HTTPException(status_code=500, detail=f"AI topic extraction failed: {str(e)}")
 
     if not topics:
-        raise HTTPException(status_code=500, detail="Could not extract topics from this PDF. The content may be too short or unclear.")
+        raw_preview = msg.content[0].text[:300] if 'msg' in dir() else 'no response'
+        raise HTTPException(status_code=500, detail=f"Could not extract topics. Claude raw: {raw_preview!r}")
 
     truncated_text = pdf_text[:40000]
 

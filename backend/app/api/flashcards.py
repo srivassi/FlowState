@@ -181,7 +181,7 @@ def generate_flashcards(
 
     response = client.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=4096,
+        max_tokens=8096,
         messages=[{"role": "user", "content": prompt}],
     )
 
@@ -213,8 +213,20 @@ def generate_flashcards(
             except Exception:
                 pass
 
+    # 4. Response truncated mid-stream — salvage complete objects before the cut
     if cards is None:
-        raise HTTPException(status_code=500, detail="Claude returned invalid JSON")
+        start = raw.find("[")
+        if start != -1:
+            truncated = raw[start:]
+            last_brace = truncated.rfind("}")
+            if last_brace != -1:
+                try:
+                    cards = json.loads(truncated[:last_brace + 1] + "]")
+                except Exception:
+                    pass
+
+    if cards is None:
+        raise HTTPException(status_code=500, detail=f"Claude returned invalid JSON. Raw (first 500 chars): {raw[:500]!r}")
 
     if not isinstance(cards, list):
         raise HTTPException(status_code=500, detail="Expected a JSON array from Claude")

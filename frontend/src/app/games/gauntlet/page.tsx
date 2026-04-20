@@ -21,6 +21,7 @@ type Phase = 'loading' | 'active' | 'finished'
 
 
 const STAR_META: Record<number, { label: string; color: string; bg: string }> = {
+  0: { label: 'Skipped',        color: '#6B7280', bg: '#F3F4F6' },
   1: { label: 'Getting there',  color: '#DC2626', bg: '#FEF2F2' },
   2: { label: 'Good work',      color: '#D97706', bg: '#FFFBEB' },
   3: { label: 'Nailed it',      color: '#16A34A', bg: '#F0FDF4' },
@@ -52,7 +53,8 @@ function TopicRail({ topicStates, currentIdx }: { topicStates: TopicState[]; cur
             }}>
             <span>{done ? '✓' : active ? '▶' : `${i + 1}`}</span>
             <span className="max-w-30 truncate">{ts.topic.title}</span>
-            {done && ts.stars && <span>{'⭐'.repeat(ts.stars)}</span>}
+            {done && ts.stars !== null && ts.stars > 0 && <span>{'⭐'.repeat(ts.stars)}</span>}
+            {done && ts.stars === 0 && <span>—</span>}
           </div>
         )
       })}
@@ -143,6 +145,19 @@ export default function GauntletPage() {
     sendTurn(msg, topicStates, currentIdx, pdfText, topicStates.map(s => s.topic))
   }
 
+  const handleSkip = () => {
+    if (sending || phase !== 'active') return
+    const skipped = topicStates.map((s, i) => i === currentIdx ? { ...s, stars: 0 } : s)
+    setTopicStates(skipped)
+    const next = currentIdx + 1
+    if (next >= topicStates.length) {
+      setPhase('finished')
+    } else {
+      setCurrentIdx(next)
+      setTimeout(() => sendTurn('', skipped, next, pdfText, skipped.map(s => s.topic)), 300)
+    }
+  }
+
   const totalStars = topicStates.reduce((s, ts) => s + (ts.stars || 0), 0)
   const maxStars   = topicStates.length * 3
   const pct        = maxStars > 0 ? Math.round((totalStars / maxStars) * 100) : 0
@@ -191,7 +206,7 @@ export default function GauntletPage() {
               <div key={ts.topic.id} className="flex items-center justify-between rounded-lg border px-4 py-3"
                 style={{ borderColor: N.border, backgroundColor: N.bg }}>
                 <span className="truncate text-sm font-medium mr-3" style={{ color: N.text }}>{ts.topic.title}</span>
-                {ts.stars && <StarBadge stars={ts.stars} />}
+                {ts.stars !== null && <StarBadge stars={ts.stars} />}
               </div>
             ))}
           </div>
@@ -309,6 +324,11 @@ export default function GauntletPage() {
             className="flex-1 rounded-lg px-4 py-2.5 text-sm focus:outline-none disabled:opacity-50"
             style={{ border: `1px solid ${N.border}`, backgroundColor: N.sidebar, color: N.text }}
           />
+          <button onClick={handleSkip} disabled={sending}
+            className="rounded-lg px-4 py-2.5 text-sm font-medium transition hover:bg-[#EFEFED] disabled:opacity-40"
+            style={{ border: `1px solid ${N.border}`, color: N.muted, backgroundColor: N.bg }}>
+            Skip
+          </button>
           <button onClick={handleSend} disabled={sending || !input.trim()}
             className="rounded-lg px-5 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
             style={{ backgroundColor: N.indigo }}>

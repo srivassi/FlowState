@@ -1,11 +1,14 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import List, Optional, Dict
+from datetime import datetime, timezone
+from collections import defaultdict
 import anthropic
 import os
 import io
 import json
 import re
+from app.core.supabase import get_supabase_client
 
 try:
     import pypdf
@@ -28,18 +31,31 @@ class StartRequest(BaseModel):
 
 
 class TopicResult(BaseModel):
-    topics: List[Dict]   # [{id, title, summary}]
-    pdf_text: str        # truncated, passed back so frontend doesn't re-fetch
+    topics: List[Dict]
+    pdf_text: str
 
 
 class ChatRequest(BaseModel):
     pdf_text: str
     topics: List[Dict]
     current_topic_index: int
-    messages: List[Dict[str, str]]   # [{role, content}]
+    messages: List[Dict[str, str]]
     user_message: str
-    # Returned by the model to signal state changes:
-    # action can be: "answer" | "next_topic" | "finish"
+
+
+class RoomCreate(BaseModel):
+    user_id: str
+    course_id: Optional[str] = None
+    pdf_url: str
+    pdf_name: Optional[str] = None
+
+
+class SessionSave(BaseModel):
+    room_id: str
+    user_id: str
+    total_stars: int
+    max_stars: int
+    topic_results: List[Dict]  # [{title, stars}]
 
 
 def _fetch_pdf_text(pdf_url: str) -> str:
@@ -163,7 +179,7 @@ def gauntlet_chat(body: ChatRequest):
     topic = body.topics[body.current_topic_index] if body.current_topic_index < len(body.topics) else None
     is_last_topic = body.current_topic_index >= len(body.topics) - 1
 
-    system = f"""You are a Socratic tutor running a "Gauntlet" study session. Your job is to teach through dialogue — not lecture.
+    system = f"""You are a Socratic tutor running a "Gauntlet" study session. Your role is to guide the student to understanding through conversation — never just quiz them.
 
 FULL PDF CONTENT:
 {body.pdf_text[:30000]}
@@ -174,30 +190,32 @@ ALL TOPICS IN THIS SESSION:
 CURRENT TOPIC ({body.current_topic_index + 1} of {len(body.topics)}):
 {json.dumps(topic, indent=2) if topic else "Session complete"}
 
-YOUR BEHAVIOUR:
-- If this is the first message on a topic (no prior messages), briefly introduce the topic (2-3 sentences) then ask ONE focused question to probe understanding. Do NOT ask multiple questions at once.
-- When the student responds: evaluate their answer, give encouraging feedback, correct misconceptions gently, then either:
-  a) Ask a follow-up to go deeper if their answer was shallow
-  b) Award stars and move on if they demonstrated solid understanding
-- Keep responses concise — this is a dialogue, not a lecture. Max 4 sentences per turn.
-- Be warm and encouraging. This is a study game, not an exam.
+HOW TO TEACH:
+- If this is the first message on a topic, give a 1-2 sentence framing of why this topic matters, then ask ONE open question to get them thinking. Do NOT list facts or lecture.
+- When the student responds — even partially or incorrectly — do NOT just say "correct/incorrect". Instead:
+  - If they're on the right track: affirm the specific thing they got right, then ask a follow-up that pushes one level deeper ("good — so what does that mean for X?")
+  - If they're partially right: echo back what they said, gently highlight the gap, and ask a question that nudges them toward filling it ("you've got the what — what about the why?")
+  - If they're wrong or stuck: don't give the answer. Ask a simpler bridging question that helps them reason toward it. Use analogies if helpful.
+- Think of each exchange as one step in a journey toward mastery — not a pass/fail test. Keep building on what they said.
+- Max 3 sentences per response. No bullet lists. Conversational tone.
+- Only move on when the student has demonstrated they genuinely understand the concept — not just parroted it back.
 
 STARS SYSTEM (include in your response when wrapping up a topic):
-- ⭐⭐⭐ Nailed it — deep understanding shown
-- ⭐⭐ Good — core idea correct, some gaps
-- ⭐ Getting there — needs more work
+- ⭐⭐⭐ Nailed it — arrived at deep understanding through the discussion
+- ⭐⭐ Good — core idea solid, some nuance missing
+- ⭐ Getting there — surface-level understanding, needs more work
 
 MOVING ON:
-When you decide the student has engaged enough with the current topic, end your message with exactly this JSON on its own line:
+When you are satisfied the student understands the topic, end your message with exactly this JSON on its own line:
 {{"action": "next_topic", "stars": 3}}
 (stars can be 1, 2, or 3)
 
 If this is the last topic and they've finished it, use:
 {{"action": "finish", "stars": 3}}
 
-Otherwise just respond normally with no JSON.
+Otherwise respond normally with no JSON.
 
-IMPORTANT: Only include the JSON line when you are actually moving to the next topic or finishing. Never include it mid-conversation."""
+IMPORTANT: Only include the JSON line when genuinely moving on. Never include it mid-discussion."""
 
     messages = [*body.messages, {"role": "user", "content": body.user_message}]
 
@@ -233,3 +251,78 @@ IMPORTANT: Only include the JSON line when you are actually moving to the next t
         "action": action,
         "stars": stars,
     }
+
+
+# ─── Rooms ───────────────────────────────────────────────────
+
+@router.get("/rooms")
+def get_rooms(user_id: str = Query(...), course_id: Optional[str] = Query(None)):
+    supabase = get_supabase_client()
+    q = supabase.table("gauntlet_rooms").select("*").eq("user_id", user_id)
+    if course_id:
+        q = q.eq("course_id", course_id)
+    rooms = q.order("last_played_at", desc=True).execute().data or []
+
+    if not rooms:
+        return []
+
+    room_ids = [r["id"] for r in rooms]
+    sessions = (
+        supabase.table("gauntlet_sessions")
+        .select("room_id, total_stars, max_stars, completed_at")
+        .in_("room_id", room_ids)
+        .execute()
+        .data or []
+    )
+
+    sess_map: dict = defaultdict(list)
+    for s in sessions:
+        sess_map[s["room_id"]].append(s)
+
+    for room in rooms:
+        sess = sess_map[room["id"]]
+        room["session_count"] = len(sess)
+        room["best_stars"] = max((s["total_stars"] for s in sess), default=None)
+        room["best_max_stars"] = next(
+            (s["max_stars"] for s in sess if s["total_stars"] == room["best_stars"]), None
+        ) if sess else None
+
+    return rooms
+
+
+@router.post("/rooms")
+def upsert_room(body: RoomCreate):
+    supabase = get_supabase_client()
+    existing = (
+        supabase.table("gauntlet_rooms")
+        .select("*")
+        .eq("user_id", body.user_id)
+        .eq("pdf_url", body.pdf_url)
+        .execute()
+    )
+    if existing.data:
+        return existing.data[0]
+    result = supabase.table("gauntlet_rooms").insert({
+        "user_id": body.user_id,
+        "course_id": body.course_id,
+        "pdf_url": body.pdf_url,
+        "pdf_name": body.pdf_name,
+    }).execute()
+    if not result.data:
+        raise HTTPException(status_code=400, detail="Failed to create room")
+    return result.data[0]
+
+
+@router.post("/sessions")
+def save_session(body: SessionSave):
+    supabase = get_supabase_client()
+    result = supabase.table("gauntlet_sessions").insert({
+        "room_id": body.room_id,
+        "user_id": body.user_id,
+        "total_stars": body.total_stars,
+        "max_stars": body.max_stars,
+        "topic_results": body.topic_results,
+    }).execute()
+    now = datetime.now(timezone.utc).isoformat()
+    supabase.table("gauntlet_rooms").update({"last_played_at": now}).eq("id", body.room_id).execute()
+    return result.data[0] if result.data else {}

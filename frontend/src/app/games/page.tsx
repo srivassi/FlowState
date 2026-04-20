@@ -15,6 +15,19 @@ const NOTION = {
 
 type Course = { id: string; name: string; color: string }
 type FlashcardSet = { id: string; title: string; course_id: string }
+type GauntletRoom = {
+  id: string; pdf_url: string; pdf_name: string; last_played_at: string | null
+  session_count: number; best_stars: number | null; best_max_stars: number | null
+}
+
+function timeAgo(dateStr: string | null) {
+  if (!dateStr) return 'Never played'
+  const diff = Date.now() - new Date(dateStr).getTime()
+  const days = Math.floor(diff / 86400000)
+  if (days === 0) return 'Today'
+  if (days === 1) return 'Yesterday'
+  return `${days}d ago`
+}
 
 const GAMES = [
   {
@@ -49,8 +62,11 @@ export default function GamesPage() {
   // Gauntlet picker state
   const [showGauntletPicker, setShowGauntletPicker] = useState(false)
   const [gauntletCourse, setGauntletCourse] = useState<string>('')
+  const [rooms, setRooms] = useState<GauntletRoom[]>([])
   const [whiteboards, setWhiteboards] = useState<any[]>([])
+  const [loadingRooms, setLoadingRooms] = useState(false)
   const [loadingWb, setLoadingWb] = useState(false)
+  const [showNewPdf, setShowNewPdf] = useState(false)
 
   // Jeopardy picker state
   const [showJeopardyPicker, setShowJeopardyPicker] = useState(false)
@@ -76,21 +92,31 @@ export default function GamesPage() {
       .finally(() => setLoadingSets(false))
   }, [jeopardyCourse, userId])
 
-  // Load whiteboard pages when gauntlet course selected
+  // Load rooms + whiteboards when gauntlet course selected
   useEffect(() => {
     if (!gauntletCourse || !userId) return
+    setLoadingRooms(true)
     setLoadingWb(true)
-    api.getWhiteboard(gauntletCourse, userId)
-      .then(wb => {
-        const pages = wb.pages || (wb.pdf_url ? [{ id: 'default', name: wb.pdf_name || 'PDF', pdf_url: wb.pdf_url, pdf_name: wb.pdf_name }] : [])
-        setWhiteboards(pages)
-      })
-      .catch(() => setWhiteboards([]))
-      .finally(() => setLoadingWb(false))
+    setRooms([])
+    setWhiteboards([])
+    setShowNewPdf(false)
+    Promise.all([
+      api.gauntletGetRooms(userId, gauntletCourse).catch(() => []),
+      api.getWhiteboard(gauntletCourse, userId).catch(() => ({})),
+    ]).then(([roomList, wb]) => {
+      setRooms(roomList)
+      const pages = wb.pages || (wb.pdf_url ? [{ id: 'default', name: wb.pdf_name || 'PDF', pdf_url: wb.pdf_url, pdf_name: wb.pdf_name }] : [])
+      setWhiteboards(pages)
+    }).finally(() => { setLoadingRooms(false); setLoadingWb(false) })
   }, [gauntletCourse, userId])
 
-  const launchGauntlet = (pdfUrl: string, pdfName: string) => {
-    sessionStorage.setItem('gauntletPdf', JSON.stringify({ pdfUrl, pdfName, courseId: gauntletCourse, userId }))
+  const launchGauntlet = async (pdfUrl: string, pdfName: string, existingRoomId?: string) => {
+    let roomId = existingRoomId
+    if (!roomId) {
+      const room = await api.gauntletUpsertRoom({ user_id: userId, course_id: gauntletCourse, pdf_url: pdfUrl, pdf_name: pdfName })
+      roomId = room.id
+    }
+    sessionStorage.setItem('gauntletPdf', JSON.stringify({ pdfUrl, pdfName, courseId: gauntletCourse, userId, roomId }))
     router.push('/games/gauntlet')
   }
 
@@ -147,43 +173,80 @@ export default function GamesPage() {
         {showGauntletPicker && (
           <div className="mt-8 rounded-xl border bg-white p-6" style={{ borderColor: NOTION.border }}>
             <div className="mb-4 flex items-center justify-between">
-              <span className="font-semibold">⚔️ Choose a PDF for Gauntlet</span>
-              <button onClick={() => { setShowGauntletPicker(false); setGauntletCourse('') }}
+              <span className="font-semibold">⚔️ Gauntlet Rooms</span>
+              <button onClick={() => { setShowGauntletPicker(false); setGauntletCourse(''); setRooms([]); setShowNewPdf(false) }}
                 className="text-sm" style={{ color: NOTION.muted }}>✕</button>
             </div>
+
             <label className="mb-1 block text-xs font-medium" style={{ color: NOTION.muted }}>Module</label>
-            <select value={gauntletCourse} onChange={e => { setGauntletCourse(e.target.value); setWhiteboards([]) }}
-              className="mb-4 w-full rounded-lg border px-3 py-2 text-sm focus:outline-none"
+            <select value={gauntletCourse} onChange={e => { setGauntletCourse(e.target.value); setRooms([]); setShowNewPdf(false) }}
+              className="mb-5 w-full rounded-lg border px-3 py-2 text-sm focus:outline-none"
               style={{ borderColor: NOTION.border }}>
               <option value="">Select a module…</option>
               {courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
 
-            {gauntletCourse && (
-              loadingWb ? (
-                <p className="text-sm" style={{ color: NOTION.muted }}>Loading PDFs…</p>
-              ) : whiteboards.length === 0 ? (
-                <p className="text-sm" style={{ color: NOTION.muted }}>
-                  No PDFs uploaded for this module yet. Upload one from the{' '}
-                  <Link href="/whiteboard" className="underline">Whiteboard</Link>.
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  <label className="mb-1 block text-xs font-medium" style={{ color: NOTION.muted }}>PDF</label>
-                  {whiteboards.map((p: any) => (
-                    p.pdf_url && (
-                      <button key={p.id} onClick={() => launchGauntlet(p.pdf_url, p.pdf_name || p.name)}
-                        className="flex w-full items-center gap-3 rounded-lg border px-4 py-3 text-left text-sm transition hover:bg-[#F7F7F5]"
+            {gauntletCourse && (loadingRooms ? (
+              <p className="text-sm" style={{ color: NOTION.muted }}>Loading…</p>
+            ) : (
+              <>
+                {/* Existing rooms */}
+                {rooms.length > 0 && (
+                  <div className="mb-4 space-y-2">
+                    {rooms.map(room => (
+                      <div key={room.id} className="flex items-center gap-3 rounded-xl border px-4 py-3"
                         style={{ borderColor: NOTION.border }}>
-                        <span>📄</span>
-                        <span className="flex-1 truncate font-medium">{p.pdf_name || p.name}</span>
-                        <span className="text-xs" style={{ color: '#6366F1' }}>Start →</span>
-                      </button>
-                    )
-                  ))}
-                </div>
-              )
-            )}
+                        <span className="text-lg">📄</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="truncate text-sm font-medium" style={{ color: NOTION.text }}>{room.pdf_name || 'PDF'}</div>
+                          <div className="text-xs mt-0.5" style={{ color: NOTION.muted }}>
+                            {room.session_count} {room.session_count === 1 ? 'session' : 'sessions'}
+                            {room.best_stars != null && ` · Best: ${room.best_stars}/${room.best_max_stars} ⭐`}
+                            {' · '}{timeAgo(room.last_played_at)}
+                          </div>
+                        </div>
+                        <button onClick={() => launchGauntlet(room.pdf_url, room.pdf_name || 'PDF', room.id)}
+                          className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition hover:opacity-90"
+                          style={{ backgroundColor: '#6366F1' }}>
+                          Play →
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* New PDF section */}
+                {whiteboards.filter(p => p.pdf_url && !rooms.find(r => r.pdf_url === p.pdf_url)).length > 0 && (
+                  <>
+                    <button onClick={() => setShowNewPdf(v => !v)}
+                      className="mb-3 text-xs font-medium transition hover:opacity-70"
+                      style={{ color: '#6366F1' }}>
+                      {showNewPdf ? '▾' : '▸'} {rooms.length > 0 ? 'Start a new room' : 'Choose a PDF'}
+                    </button>
+                    {showNewPdf && (
+                      <div className="space-y-2">
+                        {whiteboards.filter(p => p.pdf_url && !rooms.find(r => r.pdf_url === p.pdf_url)).map((p: any) => (
+                          <button key={p.id} onClick={() => launchGauntlet(p.pdf_url, p.pdf_name || p.name)}
+                            className="flex w-full items-center gap-3 rounded-lg border px-4 py-3 text-left text-sm transition hover:bg-[#F7F7F5]"
+                            style={{ borderColor: NOTION.border }}>
+                            <span>📄</span>
+                            <span className="flex-1 truncate font-medium">{p.pdf_name || p.name}</span>
+                            <span className="text-xs" style={{ color: '#6366F1' }}>Start →</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {rooms.length === 0 && !loadingWb && whiteboards.filter(p => p.pdf_url).length === 0 && (
+                  <p className="text-sm" style={{ color: NOTION.muted }}>
+                    No PDFs uploaded for this module yet. Upload one from the{' '}
+                    <Link href="/whiteboard" className="underline">Whiteboard</Link>.
+                  </p>
+                )}
+              </>
+            ))}
           </div>
         )}
 

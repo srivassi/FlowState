@@ -137,10 +137,9 @@ Aim for 4-8 topics. If the PDF is short, fewer is fine."""
             max_tokens=2000,
             messages=[
                 {"role": "user", "content": prompt},
-                {"role": "assistant", "content": "{"},
             ],
         )
-        result = _extract_json("{" + msg.content[0].text)
+        result = _extract_json(msg.content[0].text)
         topics = result.get("topics", [])
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI topic extraction failed: {str(e)}")

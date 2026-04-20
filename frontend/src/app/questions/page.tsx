@@ -218,12 +218,17 @@ export default function QuestionsPage() {
       form.append('title', title)
       form.append('source_label', extractYear.trim())
       try {
-        const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/questions/extract`, { method: 'POST', body: form })
+        const url = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/questions/extract`
+        console.log('[extract] POST', url, { file: file.name, title, course_id: selectedCourse })
+        const res = await fetch(url, { method: 'POST', body: form })
+        console.log('[extract] response', res.status, res.statusText)
         if (!res.ok) {
           const err = await res.json().catch(() => ({ detail: res.statusText }))
+          console.error('[extract] error body', err)
           errors.push(`${file.name}: ${err.detail || 'Extraction failed'}`)
         }
       } catch (e: any) {
+        console.error('[extract] fetch threw', e)
         errors.push(`${file.name}: ${e.message}`)
       }
     }

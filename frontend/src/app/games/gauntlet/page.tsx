@@ -21,6 +21,7 @@ type Phase = 'loading' | 'active' | 'finished'
 
 
 const STAR_META: Record<number, { label: string; color: string; bg: string }> = {
+  0: { label: 'Skipped',        color: '#6B7280', bg: '#F3F4F6' },
   1: { label: 'Getting there',  color: '#DC2626', bg: '#FEF2F2' },
   2: { label: 'Good work',      color: '#D97706', bg: '#FFFBEB' },
   3: { label: 'Nailed it',      color: '#16A34A', bg: '#F0FDF4' },
@@ -36,15 +37,19 @@ function StarBadge({ stars }: { stars: number }) {
   )
 }
 
-function TopicRail({ topicStates, currentIdx }: { topicStates: TopicState[]; currentIdx: number }) {
+function TopicRail({ topicStates, currentIdx, onSelect }: {
+  topicStates: TopicState[]
+  currentIdx: number
+  onSelect: (i: number) => void
+}) {
   return (
     <div className="flex flex-wrap gap-1.5">
       {topicStates.map((ts, i) => {
         const active = i === currentIdx
         const done   = ts.stars !== null
         return (
-          <div key={ts.topic.id}
-            className="flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium"
+          <button key={ts.topic.id} onClick={() => onSelect(i)}
+            className="flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium transition-opacity hover:opacity-80"
             style={{
               backgroundColor: active ? N.indigo : done ? '#F0FDF4' : N.hover,
               color: active ? '#fff' : done ? '#16A34A' : N.muted,
@@ -52,13 +57,16 @@ function TopicRail({ topicStates, currentIdx }: { topicStates: TopicState[]; cur
             }}>
             <span>{done ? '✓' : active ? '▶' : `${i + 1}`}</span>
             <span className="max-w-30 truncate">{ts.topic.title}</span>
-            {done && ts.stars && <span>{'⭐'.repeat(ts.stars)}</span>}
-          </div>
+            {done && ts.stars !== null && ts.stars > 0 && <span>{'⭐'.repeat(ts.stars)}</span>}
+            {done && ts.stars === 0 && <span>—</span>}
+          </button>
         )
       })}
     </div>
   )
 }
+
+type PendingNext = { nextIdx: number; statesWithStars: TopicState[]; stars: number }
 
 export default function GauntletPage() {
   const router = useRouter()
@@ -70,6 +78,9 @@ export default function GauntletPage() {
   const [pdfText, setPdfText]         = useState('')
   const [input, setInput]             = useState('')
   const [sending, setSending]         = useState(false)
+  const [pendingNext, setPendingNext] = useState<PendingNext | null>(null)
+  const [roomId, setRoomId]           = useState<string | null>(null)
+  const [sessionSaved, setSessionSaved] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const currentTS = topicStates[currentIdx]
 
@@ -77,11 +88,30 @@ export default function GauntletPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [topicStates, currentIdx])
 
+  // Save session when finished
+  useEffect(() => {
+    if (phase !== 'finished' || sessionSaved || !roomId || topicStates.length === 0) return
+    setSessionSaved(true)
+    const raw = sessionStorage.getItem('gauntletPdf')
+    const userId = raw ? JSON.parse(raw).userId : null
+    if (!userId) return
+    const total = topicStates.reduce((s, ts) => s + (ts.stars ?? 0), 0)
+    const max = topicStates.length * 3
+    api.gauntletSaveSession({
+      room_id: roomId,
+      user_id: userId,
+      total_stars: total,
+      max_stars: max,
+      topic_results: topicStates.map(ts => ({ title: ts.topic.title, stars: ts.stars ?? 0 })),
+    }).catch(() => {})
+  }, [phase, sessionSaved, roomId, topicStates])
+
   useEffect(() => {
     const raw = sessionStorage.getItem('gauntletPdf')
     if (!raw) { router.replace('/games'); return }
-    const { pdfUrl, pdfName: name } = JSON.parse(raw)
+    const { pdfUrl, pdfName: name, roomId: rid } = JSON.parse(raw)
     setPdfName(name || 'PDF')
+    if (rid) setRoomId(rid)
     setTimeout(() => setLoadingMsg('Extracting topics with Claude…'), 1400)
     api.gauntletStart(pdfUrl)
       .then(({ topics, pdf_text }: { topics: Topic[]; pdf_text: string }) => {
@@ -121,11 +151,9 @@ export default function GauntletPage() {
         const withStars = updated.map((s, i) => i === idx ? { ...s, stars: res.stars } : s)
         setTopicStates(withStars)
         if (res.action === 'finish') {
-          setPhase('finished')
+          setPendingNext({ nextIdx: -1, statesWithStars: withStars, stars: res.stars ?? 0 })
         } else {
-          const next = idx + 1
-          setCurrentIdx(next)
-          setTimeout(() => sendTurn('', withStars, next, text, topics), 500)
+          setPendingNext({ nextIdx: idx + 1, statesWithStars: withStars, stars: res.stars ?? 0 })
         }
       } else {
         setTopicStates(updated)
@@ -141,6 +169,44 @@ export default function GauntletPage() {
     if (!input.trim() || sending || phase !== 'active') return
     const msg = input.trim(); setInput('')
     sendTurn(msg, topicStates, currentIdx, pdfText, topicStates.map(s => s.topic))
+  }
+
+const handleContinue = () => {
+    if (!pendingNext) return
+    const { nextIdx, statesWithStars } = pendingNext
+    setPendingNext(null)
+    if (nextIdx === -1) {
+      setPhase('finished')
+    } else {
+      setCurrentIdx(nextIdx)
+      sendTurn('', statesWithStars, nextIdx, pdfText, statesWithStars.map(s => s.topic))
+    }
+  }
+
+  const handleGoAgain = () => {
+    if (!pendingNext) return
+    const reset = pendingNext.statesWithStars.map((s, i) =>
+      i === currentIdx ? { ...s, messages: [], stars: null } : s
+    )
+    setPendingNext(null)
+    setTopicStates(reset)
+    sendTurn('', reset, currentIdx, pdfText, reset.map(s => s.topic))
+  }
+
+  const handleEndSession = () => {
+    if (!confirm('End session? Your progress so far will be saved.')) return
+    const finished = topicStates.map(s => s.stars !== null ? s : { ...s, stars: 0 })
+    setTopicStates(finished)
+    setPhase('finished')
+  }
+
+  const handleJumpTo = (i: number) => {
+    if (sending || i === currentIdx) return
+    setPendingNext(null)
+    setCurrentIdx(i)
+    if (topicStates[i].messages.length === 0) {
+      sendTurn('', topicStates, i, pdfText, topicStates.map(s => s.topic))
+    }
   }
 
   const totalStars = topicStates.reduce((s, ts) => s + (ts.stars || 0), 0)
@@ -191,7 +257,7 @@ export default function GauntletPage() {
               <div key={ts.topic.id} className="flex items-center justify-between rounded-lg border px-4 py-3"
                 style={{ borderColor: N.border, backgroundColor: N.bg }}>
                 <span className="truncate text-sm font-medium mr-3" style={{ color: N.text }}>{ts.topic.title}</span>
-                {ts.stars && <StarBadge stars={ts.stars} />}
+                {ts.stars !== null && <StarBadge stars={ts.stars} />}
               </div>
             ))}
           </div>
@@ -241,16 +307,23 @@ export default function GauntletPage() {
           <div className="text-sm font-semibold" style={{ color: N.text }}>⚔️ Gauntlet</div>
           <div className="truncate text-xs" style={{ color: N.muted }}>{pdfName}</div>
         </div>
-        <div className="shrink-0 text-right">
-          <div className="text-sm font-bold" style={{ color: N.indigo }}>{totalStars} ⭐</div>
-          <div className="text-xs" style={{ color: N.muted }}>{pct}%</div>
+        <div className="shrink-0 flex items-center gap-3">
+          <div className="text-right">
+            <div className="text-sm font-bold" style={{ color: N.indigo }}>{totalStars} ⭐</div>
+            <div className="text-xs" style={{ color: N.muted }}>{pct}%</div>
+          </div>
+          <button onClick={handleEndSession}
+            className="rounded-lg px-3 py-1.5 text-xs font-medium transition hover:bg-[#EFEFED]"
+            style={{ border: `1px solid ${N.border}`, color: N.muted }}>
+            End
+          </button>
         </div>
       </div>
 
       {/* Topic rail */}
       <div className="shrink-0 overflow-x-auto px-6 py-3"
         style={{ borderBottom: `1px solid ${N.border}`, backgroundColor: N.bg }}>
-        <TopicRail topicStates={topicStates} currentIdx={currentIdx} />
+        <TopicRail topicStates={topicStates} currentIdx={currentIdx} onSelect={handleJumpTo} />
       </div>
 
       {/* Current topic label */}
@@ -293,6 +366,35 @@ export default function GauntletPage() {
             </div>
           </div>
         )}
+
+        {/* Topic transition card */}
+        {pendingNext && (
+          <div className="mx-auto w-full max-w-md rounded-2xl border p-5 text-center"
+            style={{ borderColor: N.indigo + '44', backgroundColor: N.indigoBg }}>
+            <div className="mb-1 text-2xl">
+              {pendingNext.stars === 3 ? '🏆' : pendingNext.stars === 2 ? '⭐⭐' : pendingNext.stars === 1 ? '⭐' : '—'}
+            </div>
+            <div className="mb-0.5 text-sm font-semibold" style={{ color: N.text }}>
+              {currentTS?.topic.title}
+            </div>
+            <div className="mb-4 text-xs" style={{ color: N.muted }}>
+              {pendingNext.stars > 0 ? <StarBadge stars={pendingNext.stars} /> : <span>Skipped</span>}
+            </div>
+            <div className="flex justify-center gap-3">
+              <button onClick={handleGoAgain}
+                className="rounded-lg px-4 py-2 text-sm font-medium transition hover:opacity-80"
+                style={{ border: `1px solid ${N.indigo}66`, color: N.indigo, backgroundColor: N.bg }}>
+                Go deeper ↺
+              </button>
+              <button onClick={handleContinue}
+                className="rounded-lg px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
+                style={{ backgroundColor: N.indigo }}>
+                {pendingNext.nextIdx === -1 ? 'See results →' : `Next: ${topicStates[pendingNext.nextIdx]?.topic.title ?? '…'} →`}
+              </button>
+            </div>
+          </div>
+        )}
+
         <div ref={messagesEndRef} />
       </div>
 
@@ -304,7 +406,7 @@ export default function GauntletPage() {
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSend()}
             placeholder="Type your answer…"
-            disabled={sending}
+            disabled={sending || !!pendingNext}
             autoFocus
             className="flex-1 rounded-lg px-4 py-2.5 text-sm focus:outline-none disabled:opacity-50"
             style={{ border: `1px solid ${N.border}`, backgroundColor: N.sidebar, color: N.text }}

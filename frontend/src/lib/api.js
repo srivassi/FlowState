@@ -69,4 +69,7 @@ export const api = {
   // ── Gauntlet ──────────────────────────────────────────────────
   gauntletStart: (pdfUrl) => req('/tutor/start', { method: 'POST', body: JSON.stringify({ pdf_url: pdfUrl }) }),
   gauntletChat: (data) => req('/tutor/chat', { method: 'POST', body: JSON.stringify(data) }),
+  gauntletGetRooms: (userId, courseId) => req(`/tutor/rooms?user_id=${userId}${courseId ? `&course_id=${courseId}` : ''}`),
+  gauntletUpsertRoom: (data) => req('/tutor/rooms', { method: 'POST', body: JSON.stringify(data) }),
+  gauntletSaveSession: (data) => req('/tutor/sessions', { method: 'POST', body: JSON.stringify(data) }),
 }

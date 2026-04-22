@@ -423,7 +423,7 @@ export default function QuestionsPage() {
     if (!genPdf || !genTitle.trim() || !userId || !selectedCourse) return
     setGenerating(true); setGenError(''); setGenSuccess(null)
     try {
-      const scoreHint = genSuccess !== null ? buildScoreInstructions() : ''
+      const scoreHint = scoreEntries.length > 0 ? buildScoreInstructions() : ''
       const combinedInstructions = [genInstructions.trim(), scoreHint].filter(Boolean).join(' ')
       const result = await api.generateQuestionBank({
         user_id: userId, course_id: selectedCourse, pdf_url: genPdf, pdf_name: genPdfName,
@@ -608,7 +608,7 @@ export default function QuestionsPage() {
                 <button onClick={handleGenerate} disabled={generating || !genPdf || !genTitle.trim()}
                   className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
                   style={{ backgroundColor: N.indigo }}>
-                  {generating ? 'Generating…' : genSuccess !== null ? '↺ Regenerate' : 'Generate'}
+                  {generating ? 'Generating…' : (genSuccess !== null || hasTopics) ? '↺ Regenerate' : 'Generate'}
                 </button>
                 {genSuccess !== null && (
                   <span className="text-xs font-medium" style={{ color: N.green }}>

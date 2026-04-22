@@ -30,7 +30,29 @@ const GRADE_STYLE: Record<string, { color: string; bg: string }> = {
   Insufficient: { color: N.red,      bg: N.redBg    },
 }
 
+// ── MCQ helpers ──────────────────────────────────────────────
+function parseMCQ(text: string) {
+  const lines = text.split('\n')
+  const optIdxs = lines.reduce((acc: number[], l, i) => /^\s*[A-D]\)/.test(l) ? [...acc, i] : acc, [])
+  if (optIdxs.length < 2) return null
+  const stem = lines.slice(0, optIdxs[0]).join('\n').trim()
+  const options = optIdxs.map(i => {
+    const t = lines[i].trim()
+    return { letter: t[0], text: t.slice(2).trim() }
+  })
+  return { stem, options }
+}
+
+function mcqCorrectLetter(modelAnswer: string) {
+  return modelAnswer.trim().match(/^([A-D])\)/)?.[1] ?? ''
+}
+
 function QuestionCard({ q }: { q: Question }) {
+  const mcq          = parseMCQ(q.question_text)
+  const correctLetter = mcq ? mcqCorrectLetter(q.model_answer) : ''
+
+  const [mcqPick, setMcqPick]       = useState('')
+  const [mcqAnswered, setMcqAnswered] = useState(false)
   const [attempt, setAttempt]   = useState('')
   const [revealed, setRevealed] = useState(false)
   const [grading, setGrading]   = useState(false)
@@ -49,16 +71,83 @@ function QuestionCard({ q }: { q: Question }) {
     }
   }
 
-  const gs = grade ? (GRADE_STYLE[grade.grade] || GRADE_STYLE.Developing) : null
+  const sourceLabel = q.source_label ? (
+    <span className="shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium"
+      style={{ backgroundColor: N.indigoBg, color: N.indigo }}>{q.source_label}</span>
+  ) : null
 
+  // ── MCQ UI ──────────────────────────────────────────────────
+  if (mcq) {
+    const isRight = mcqPick === correctLetter
+    return (
+      <div className="rounded-xl border p-5 space-y-3" style={{ borderColor: N.border, backgroundColor: N.bg }}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="text-sm leading-relaxed flex-1" style={{ color: N.text }}>{renderNote(mcq.stem)}</div>
+          {sourceLabel}
+        </div>
+
+        <div className="space-y-1.5">
+          {mcq.options.map(opt => {
+            const isSel  = mcqPick === opt.letter
+            const isCorr = opt.letter === correctLetter
+            let st: React.CSSProperties = { borderColor: N.border, backgroundColor: N.bg, color: N.text }
+            if (mcqAnswered) {
+              if (isCorr)   st = { borderColor: '#16A34A', backgroundColor: '#F0FDF4', color: '#15803D' }
+              else if (isSel) st = { borderColor: '#DC2626', backgroundColor: '#FEF2F2', color: '#B91C1C' }
+              else          st = { borderColor: N.border, backgroundColor: N.sidebar, color: N.muted }
+            } else if (isSel) {
+              st = { borderColor: N.indigo, backgroundColor: N.indigoBg, color: N.indigo }
+            }
+            return (
+              <button key={opt.letter}
+                onClick={() => !mcqAnswered && setMcqPick(opt.letter)}
+                disabled={mcqAnswered}
+                className="w-full rounded-lg border px-4 py-2.5 text-left text-sm transition hover:bg-[#EFEFED] disabled:cursor-default"
+                style={st}>
+                <span className="font-semibold mr-2">{opt.letter})</span>{opt.text}
+                {mcqAnswered && isCorr && <span className="float-right font-semibold">✓</span>}
+                {mcqAnswered && isSel && !isCorr && <span className="float-right font-semibold">✗</span>}
+              </button>
+            )
+          })}
+        </div>
+
+        {!mcqAnswered && (
+          <button onClick={() => setMcqAnswered(true)} disabled={!mcqPick}
+            className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
+            style={{ backgroundColor: N.indigo }}>
+            Check
+          </button>
+        )}
+
+        {mcqAnswered && (
+          <div className="rounded-lg border p-3 space-y-1.5"
+            style={{ borderColor: isRight ? '#16A34A44' : '#DC262644', backgroundColor: isRight ? '#F0FDF4' : '#FEF2F2' }}>
+            <div className="text-sm font-semibold" style={{ color: isRight ? '#15803D' : '#B91C1C' }}>
+              {isRight ? '✓ Correct!' : `✗ The correct answer is ${correctLetter}`}
+            </div>
+            <div className="text-sm leading-relaxed" style={{ color: N.text }}>{q.model_answer}</div>
+            {q.explanation && <div className="text-xs" style={{ color: N.muted }}>{q.explanation}</div>}
+          </div>
+        )}
+
+        {mcqAnswered && (
+          <button onClick={() => { setMcqPick(''); setMcqAnswered(false) }}
+            className="text-xs transition hover:opacity-70" style={{ color: N.muted }}>
+            ↺ Try again
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  // ── Written answer UI ───────────────────────────────────────
+  const gs = grade ? (GRADE_STYLE[grade.grade] || GRADE_STYLE.Developing) : null
   return (
     <div className="rounded-xl border p-5 space-y-3" style={{ borderColor: N.border, backgroundColor: N.bg }}>
       <div className="flex items-start justify-between gap-3">
         <div className="text-sm leading-relaxed flex-1" style={{ color: N.text }}>{renderNote(q.question_text)}</div>
-        {q.source_label && (
-          <span className="shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium"
-            style={{ backgroundColor: N.indigoBg, color: N.indigo }}>{q.source_label}</span>
-        )}
+        {sourceLabel}
       </div>
 
       <textarea
@@ -126,6 +215,7 @@ export default function QuestionsPage() {
   const [showManage, setShowManage] = useState(false)
   const [banks, setBanks]           = useState<Bank[]>([])
   const [loadingBanks, setLoadingBanks] = useState(false)
+  const [filterBank, setFilterBank] = useState<Bank | null>(null)
 
   // Upload form
   type PaperSlot = { id: string; file: File | null; title: string; year: string }
@@ -141,10 +231,12 @@ export default function QuestionsPage() {
   const [genPdf, setGenPdf]               = useState('')
   const [genPdfName, setGenPdfName]       = useState('')
   const [genTitle, setGenTitle]           = useState('')
-  const [genFormat, setGenFormat]         = useState('mixed')
-  const [genCount, setGenCount]           = useState('')
-  const [generating, setGenerating]       = useState(false)
-  const [genError, setGenError]           = useState('')
+  const [genFormat, setGenFormat]             = useState('mixed')
+  const [genCount, setGenCount]               = useState('')
+  const [genInstructions, setGenInstructions] = useState('')
+  const [generating, setGenerating]           = useState(false)
+  const [genError, setGenError]               = useState('')
+  const [genSuccess, setGenSuccess]           = useState<number | null>(null)
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }: any) => {
@@ -177,11 +269,35 @@ export default function QuestionsPage() {
       .finally(() => setLoadingBanks(false))
   }
 
+  const openBank = async (bank: Bank) => {
+    setFilterBank(bank)
+    setShowManage(false)
+    setLoadingTopics(true)
+    setTopics({})
+    setActiveTopic('')
+    try {
+      const data = await api.getQuestionBank(bank.id)
+      const t = data.topics || {}
+      setTopics(t)
+      setActiveTopic(Object.keys(t)[0] || '')
+    } catch {
+      setTopics({})
+    } finally {
+      setLoadingTopics(false)
+    }
+  }
+
+  const clearFilter = () => {
+    setFilterBank(null)
+    if (selectedCourse && userId) loadTopics(selectedCourse, userId)
+  }
+
   const handleCourseChange = (courseId: string) => {
     setSelectedCourse(courseId)
     setShowManage(false)
     setShowExtract(false)
     setShowGenerate(false)
+    setFilterBank(null)
     if (courseId && userId) {
       loadTopics(courseId, userId)
     }
@@ -242,17 +358,22 @@ export default function QuestionsPage() {
     if (showManage) loadBanks(selectedCourse, userId)
   }
 
+  const resetGenPanel = () => {
+    setShowGenerate(false); setGenPdf(''); setGenTitle(''); setGenPdfName('')
+    setGenFormat('mixed'); setGenCount(''); setGenInstructions(''); setGenSuccess(null); setGenError('')
+  }
+
   const handleGenerate = async () => {
     if (!genPdf || !genTitle.trim() || !userId || !selectedCourse) return
-    setGenerating(true); setGenError('')
+    setGenerating(true); setGenError(''); setGenSuccess(null)
     try {
-      await api.generateQuestionBank({
+      const result = await api.generateQuestionBank({
         user_id: userId, course_id: selectedCourse, pdf_url: genPdf, pdf_name: genPdfName,
         title: genTitle.trim(), format: genFormat,
         num_questions: genCount ? parseInt(genCount) : undefined,
+        instructions: genInstructions.trim() || undefined,
       })
-      setShowGenerate(false)
-      setGenPdf(''); setGenTitle(''); setGenPdfName(''); setGenFormat('mixed'); setGenCount('')
+      setGenSuccess(result.count)
       loadTopics(selectedCourse, userId)
       if (showManage) loadBanks(selectedCourse, userId)
     } catch (e: any) {
@@ -369,51 +490,69 @@ export default function QuestionsPage() {
           )}
 
           {showGenerate && (
-            <div className="flex flex-wrap gap-3 items-end max-w-3xl">
-              <div className="flex-1 min-w-36">
-                <label className="block text-xs mb-1" style={{ color: N.muted }}>Title</label>
-                <input value={genTitle} onChange={e => setGenTitle(e.target.value)}
-                  placeholder="e.g. Week 6 Notes Practice"
-                  className="w-full rounded-lg border px-3 py-1.5 text-sm focus:outline-none"
-                  style={{ borderColor: N.border }} />
+            <div className="max-w-3xl space-y-3">
+              <div className="flex flex-wrap gap-3 items-end">
+                <div className="flex-1 min-w-36">
+                  <label className="block text-xs mb-1" style={{ color: N.muted }}>Title</label>
+                  <input value={genTitle} onChange={e => { setGenTitle(e.target.value); setGenSuccess(null) }}
+                    placeholder="e.g. Week 6 Notes Practice"
+                    className="w-full rounded-lg border px-3 py-1.5 text-sm focus:outline-none"
+                    style={{ borderColor: N.border }} />
+                </div>
+                <div className="flex-1 min-w-36">
+                  <label className="block text-xs mb-1" style={{ color: N.muted }}>PDF (from Whiteboard)</label>
+                  <select value={genPdf} onChange={e => {
+                    const wb = genWhiteboards.find((p: any) => p.pdf_url === e.target.value)
+                    setGenPdf(e.target.value); setGenPdfName(wb?.pdf_name || wb?.name || ''); setGenSuccess(null)
+                  }}
+                    className="w-full rounded-lg border px-3 py-1.5 text-sm focus:outline-none"
+                    style={{ borderColor: N.border }}>
+                    <option value="">Select PDF…</option>
+                    {genWhiteboards.map((p: any) => <option key={p.id} value={p.pdf_url}>{p.pdf_name || p.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs mb-1" style={{ color: N.muted }}>Format</label>
+                  <select value={genFormat} onChange={e => { setGenFormat(e.target.value); setGenSuccess(null) }}
+                    className="rounded-lg border px-3 py-1.5 text-sm focus:outline-none"
+                    style={{ borderColor: N.border }}>
+                    <option value="mixed">Mixed</option>
+                    <option value="mcq">MCQ</option>
+                    <option value="short_answer">Short answer</option>
+                    <option value="essay">Essay</option>
+                  </select>
+                </div>
+                <div style={{ width: 80 }}>
+                  <label className="block text-xs mb-1" style={{ color: N.muted }}>Questions</label>
+                  <input value={genCount} onChange={e => { setGenCount(e.target.value.replace(/\D/g, '')); setGenSuccess(null) }}
+                    placeholder="Auto"
+                    className="w-full rounded-lg border px-3 py-1.5 text-sm focus:outline-none"
+                    style={{ borderColor: N.border }} />
+                </div>
               </div>
-              <div className="flex-1 min-w-36">
-                <label className="block text-xs mb-1" style={{ color: N.muted }}>PDF (from Whiteboard)</label>
-                <select value={genPdf} onChange={e => {
-                  const wb = genWhiteboards.find((p: any) => p.pdf_url === e.target.value)
-                  setGenPdf(e.target.value); setGenPdfName(wb?.pdf_name || wb?.name || '')
-                }}
-                  className="w-full rounded-lg border px-3 py-1.5 text-sm focus:outline-none"
-                  style={{ borderColor: N.border }}>
-                  <option value="">Select PDF…</option>
-                  {genWhiteboards.map((p: any) => <option key={p.id} value={p.pdf_url}>{p.pdf_name || p.name}</option>)}
-                </select>
-              </div>
+
               <div>
-                <label className="block text-xs mb-1" style={{ color: N.muted }}>Format</label>
-                <select value={genFormat} onChange={e => setGenFormat(e.target.value)}
-                  className="rounded-lg border px-3 py-1.5 text-sm focus:outline-none"
-                  style={{ borderColor: N.border }}>
-                  <option value="mixed">Mixed</option>
-                  <option value="mcq">MCQ</option>
-                  <option value="short_answer">Short answer</option>
-                  <option value="essay">Essay</option>
-                </select>
-              </div>
-              <div style={{ width: 80 }}>
-                <label className="block text-xs mb-1" style={{ color: N.muted }}>Questions</label>
-                <input value={genCount} onChange={e => setGenCount(e.target.value.replace(/\D/g, ''))}
-                  placeholder="Auto"
+                <label className="block text-xs mb-1" style={{ color: N.muted }}>Additional instructions (optional)</label>
+                <input value={genInstructions} onChange={e => { setGenInstructions(e.target.value); setGenSuccess(null) }}
+                  placeholder="e.g. Focus on edge cases, include code examples, emphasise week 4 content…"
                   className="w-full rounded-lg border px-3 py-1.5 text-sm focus:outline-none"
                   style={{ borderColor: N.border }} />
               </div>
-              <button onClick={handleGenerate} disabled={generating || !genPdf || !genTitle.trim()}
-                className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
-                style={{ backgroundColor: N.indigo }}>
-                {generating ? 'Generating…' : 'Generate'}
-              </button>
-              <button onClick={() => setShowGenerate(false)} className="text-sm" style={{ color: N.muted }}>✕</button>
-              {genError && <p className="w-full text-xs" style={{ color: N.red }}>{genError}</p>}
+
+              <div className="flex items-center gap-3 flex-wrap">
+                <button onClick={handleGenerate} disabled={generating || !genPdf || !genTitle.trim()}
+                  className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
+                  style={{ backgroundColor: N.indigo }}>
+                  {generating ? 'Generating…' : genSuccess !== null ? '↺ Regenerate' : 'Generate'}
+                </button>
+                {genSuccess !== null && (
+                  <span className="text-xs font-medium" style={{ color: N.green }}>
+                    ✓ {genSuccess} questions generated
+                  </span>
+                )}
+                <button onClick={resetGenPanel} className="text-sm ml-auto" style={{ color: N.muted }}>✕</button>
+                {genError && <p className="w-full text-xs" style={{ color: N.red }}>{genError}</p>}
+              </div>
             </div>
           )}
         </div>
@@ -438,7 +577,9 @@ export default function QuestionsPage() {
           ) : (
             <div className="space-y-2">
               {banks.map(bank => (
-                <div key={bank.id} className="flex items-center gap-3 rounded-xl border px-4 py-3"
+                <div key={bank.id}
+                  onClick={() => openBank(bank)}
+                  className="flex items-center gap-3 rounded-xl border px-4 py-3 cursor-pointer transition hover:bg-[#FAFAFA]"
                   style={{ borderColor: N.border, backgroundColor: N.bg }}>
                   <span>{bank.source_type === 'past_paper' ? '📄' : '✨'}</span>
                   <div className="flex-1 min-w-0">
@@ -449,8 +590,8 @@ export default function QuestionsPage() {
                       {' · '}{bank.question_count} questions
                     </div>
                   </div>
-                  <button onClick={() => handleDeleteBank(bank.id)}
-                    className="text-xs transition hover:opacity-70" style={{ color: N.red }}>
+                  <button onClick={e => { e.stopPropagation(); handleDeleteBank(bank.id) }}
+                    className="text-xs transition hover:opacity-70 shrink-0" style={{ color: N.red }}>
                     Delete
                   </button>
                 </div>
@@ -486,6 +627,15 @@ export default function QuestionsPage() {
 
           {/* Questions */}
           <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+            {filterBank && (
+              <div className="flex items-center gap-2 -mt-1 mb-1">
+                <button onClick={clearFilter} className="text-xs transition hover:opacity-70" style={{ color: N.muted }}>
+                  ← All questions
+                </button>
+                <span className="text-xs" style={{ color: N.muted }}>·</span>
+                <span className="text-xs font-medium truncate" style={{ color: N.text }}>{filterBank.title}</span>
+              </div>
+            )}
             <h2 className="text-base font-semibold" style={{ color: N.text }}>{activeTopic}</h2>
             {activeQs.map(q => <QuestionCard key={q.id} q={q} />)}
           </div>

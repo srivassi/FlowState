@@ -27,6 +27,7 @@ class GenerateRequest(BaseModel):
     title: Optional[str] = None
     format: Optional[str] = None        # 'mixed' | 'mcq' | 'short_answer' | 'essay'
     num_questions: Optional[int] = None
+    instructions: Optional[str] = None  # free-text user instructions
 
 
 class GradeRequest(BaseModel):
@@ -234,13 +235,15 @@ Model answers should be structured outlines with 5–8 key points."""
     else:
         format_instructions = f"""Generate {count_str} exam questions mixing types: definition, explain/discuss, apply/analyse, compare/contrast."""
 
+    extra = f"\n\nAdditional instructions from the user: {body.instructions.strip()}" if body.instructions and body.instructions.strip() else ""
+
     prompt = f"""You are creating an exam-style question bank from lecture notes.
 
 {format_instructions}
 
 All questions should:
 - Be at exam difficulty level (not trivial recall)
-- Be grouped under broad topic labels — each general concept gets one topic, and many questions should share the same topic label. Do NOT create a new topic per question.
+- Be grouped under broad topic labels — each general concept gets one topic, and many questions should share the same topic label. Do NOT create a new topic per question.{extra}
 
 For each question provide a model answer and explanation of what's being tested.
 
@@ -412,25 +415,25 @@ def delete_bank(bank_id: str):
 
 @router.post("/grade")
 def grade_answer(body: GradeRequest):
-    prompt = f"""You are an examiner grading a student's answer to an exam question.
+    prompt = f"""You are a supportive tutor giving feedback directly to a student on their exam answer. Be warm and constructive — lead with what they got right, then guide them toward what to strengthen. Never be harsh. Write in second person using "you".
 
 Topic: {body.topic}
 
 Question:
 {body.question_text}
 
-Student's answer:
+Their answer:
 {body.user_answer}
 
-Grade this answer strictly on its own merits — the depth of understanding demonstrated, accuracy, and completeness. Do not compare to a model answer.
+Grade on depth of understanding, accuracy, and completeness.
 
 Respond with a JSON object:
 {{
   "grade": "Excellent" | "Good" | "Developing" | "Insufficient",
   "score": 1-4,
-  "feedback": "2-3 sentences of specific, constructive feedback",
-  "what_was_good": "What the student got right",
-  "what_to_improve": "What was missing or could be stronger"
+  "feedback": "2-3 encouraging, specific sentences addressed to the student using 'you' — acknowledge the good first, then suggest improvement",
+  "what_was_good": "Specific thing(s) you got right — be concrete and encouraging",
+  "what_to_improve": "One or two specific things to add or strengthen — frame as guidance, not criticism"
 }}"""
 
     raw = _call_claude(prompt, max_tokens=1024)

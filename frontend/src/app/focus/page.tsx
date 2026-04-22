@@ -82,6 +82,8 @@ function CoffeeScene({ progress }: { progress: number }) {
         @keyframes pourWiggle{0%,100%{transform:rotate(0deg) scaleX(1)}50%{transform:rotate(1.5deg) scaleX(0.8)}}
         @keyframes stageIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
         @keyframes sheen{0%,100%{opacity:0.12}50%{opacity:0.32}}
+        @keyframes steamRise{0%{transform:translateY(0) translateX(0) scaleX(1);opacity:0}15%{opacity:0.55}85%{opacity:0.18}100%{transform:translateY(-60px) translateX(var(--sx,6px)) scaleX(2.4);opacity:0}}
+        @keyframes aromaDot{0%{transform:translateY(0) scale(1);opacity:0.6}100%{transform:translateY(-44px) scale(0);opacity:0}}
       `}</style>
 
       {/* Stage label */}
@@ -165,45 +167,66 @@ function CoffeeScene({ progress }: { progress: number }) {
       </div>
 
       {/* ── STAGE 3: Pour ── */}
-      <div style={{ position: 'absolute', inset: 0, opacity: stage === 'pour' ? 1 : 0, transition: 'opacity 1s ease', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', paddingBottom: 10 }}>
-        <div style={{ position: 'relative', width: 184, height: 155 }}>
-          {/* Cup + saucer */}
+      <div style={{ position: 'absolute', inset: 0, opacity: stage === 'pour' ? 1 : 0, transition: 'opacity 1s ease', display: 'flex', alignItems: 'flex-end', justifyContent: 'center', paddingBottom: 8 }}>
+        <div style={{ position: 'relative', width: 184, height: 158 }}>
+
+          {/* Saucer — outer rim + inner cup-rest ring */}
           <div style={{ position: 'absolute', bottom: 0, left: '50%', transform: 'translateX(-50%)' }}>
-            <div style={{ width: 78, height: 56, marginLeft: 10, borderRadius: '4px 4px 16px 16px', position: 'relative', overflow: 'hidden',
-              background: 'linear-gradient(135deg,#f4f3f0 0%,#e8e6e0 40%,#f0ede8 100%)',
-              boxShadow: 'inset -4px 0 9px rgba(0,0,0,0.09), 0 2px 8px rgba(0,0,0,0.3)',
-            }}>
-              {/* Espresso layer */}
-              <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '34%', background: 'linear-gradient(180deg,#8b4010 0%,#3d1600 100%)' }} />
-              {/* Milk pour */}
-              <div style={{ position: 'absolute', bottom: '30%', left: 0, right: 0, height: `${sp*44}%`, background: 'linear-gradient(180deg,rgba(255,248,234,0.95) 0%,rgba(235,220,192,0.88) 100%)', transition: 'height 2s ease', overflow: 'hidden' }}>
-                {/* Latte art leaf */}
-                {sp > 0.48 && (
-                  <div style={{ position: 'absolute', top: '8%', left: '50%', transform: 'translateX(-50%)', width: 44, height: 28, opacity: Math.min(1,(sp-0.48)*5), transition: 'opacity 1s ease' }}>
-                    {[0,1,2,3,4].map(i => <div key={i} style={{ position: 'absolute', top: `${18+i*13}%`, left: `${14+Math.abs(i-2)*12}%`, width: `${42-Math.abs(i-2)*10}%`, height: 2.5, borderRadius: 2, background: 'rgba(110,65,25,0.32)', transform: `rotate(${(i-2)*7}deg)` }} />)}
-                    <div style={{ position: 'absolute', top: '8%', left: '50%', transform: 'translateX(-50%)', width: 1.5, height: '82%', background: 'rgba(110,65,25,0.38)', borderRadius: 1 }} />
-                  </div>
-                )}
-                <div style={{ position: 'absolute', top: 0, left: '12%', right: '12%', height: 3, borderRadius: '50%', background: 'rgba(255,240,200,0.48)', animation: 'sheen 2.2s ease-in-out infinite' }} />
-              </div>
-            </div>
-            <div style={{ position: 'absolute', right: 4, bottom: 11, width: 15, height: 24, border: '3px solid #ddd', borderLeft: 'none', borderRadius: '0 9px 9px 0' }} />
-            {/* Saucer — below cup */}
-            <div style={{ position: 'absolute', bottom: -10, left: -10, width: 98, height: 10, borderRadius: '50%', background: 'linear-gradient(180deg,#ddd 0%,#bbb 100%)', boxShadow: '0 4px 10px rgba(0,0,0,0.35)' }} />
+            <div style={{ width: 112, height: 16, borderRadius: '50%', background: 'linear-gradient(180deg,#eceae6 0%,#d6d4d0 55%,#c4c2be 100%)', boxShadow: '0 5px 14px rgba(0,0,0,0.4), inset 0 -3px 5px rgba(0,0,0,0.12)' }} />
+            <div style={{ position: 'absolute', top: '22%', left: '50%', transform: 'translateX(-50%)', width: 82, height: '55%', borderRadius: '50%', background: 'linear-gradient(180deg,#dddbd6 0%,#cac8c4 100%)', boxShadow: 'inset 0 1px 4px rgba(0,0,0,0.18)' }} />
           </div>
-          {/* Pour stream */}
+
+          {/* Cup — centered over saucer */}
+          <div style={{ position: 'absolute', bottom: 10, left: '50%', transform: 'translateX(-50%)', width: 78, height: 56, borderRadius: '4px 4px 16px 16px', overflow: 'hidden',
+            background: 'linear-gradient(135deg,#f4f3f0 0%,#e8e6e0 40%,#f0ede8 100%)',
+            boxShadow: 'inset -4px 0 9px rgba(0,0,0,0.09), 0 2px 8px rgba(0,0,0,0.3)',
+          }}>
+            <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '34%', background: 'linear-gradient(180deg,#8b4010 0%,#3d1600 100%)' }} />
+            <div style={{ position: 'absolute', bottom: '30%', left: 0, right: 0, height: `${sp*46}%`, background: 'linear-gradient(180deg,rgba(255,248,234,0.95) 0%,rgba(235,220,192,0.88) 100%)', transition: 'height 2s ease', overflow: 'hidden' }}>
+              {sp > 0.48 && (
+                <div style={{ position: 'absolute', top: '8%', left: '50%', transform: 'translateX(-50%)', width: 44, height: 28, opacity: Math.min(1,(sp-0.48)*5), transition: 'opacity 1s ease' }}>
+                  {[0,1,2,3,4].map(i => <div key={i} style={{ position: 'absolute', top: `${18+i*13}%`, left: `${14+Math.abs(i-2)*12}%`, width: `${42-Math.abs(i-2)*10}%`, height: 2.5, borderRadius: 2, background: 'rgba(110,65,25,0.32)', transform: `rotate(${(i-2)*7}deg)` }} />)}
+                  <div style={{ position: 'absolute', top: '8%', left: '50%', transform: 'translateX(-50%)', width: 1.5, height: '82%', background: 'rgba(110,65,25,0.38)', borderRadius: 1 }} />
+                </div>
+              )}
+              <div style={{ position: 'absolute', top: 0, left: '12%', right: '12%', height: 3, borderRadius: '50%', background: 'rgba(255,240,200,0.48)', animation: 'sheen 2.2s ease-in-out infinite' }} />
+            </div>
+          </div>
+
+          {/* Handle */}
+          <div style={{ position: 'absolute', bottom: 22, left: '50%', marginLeft: 35, width: 15, height: 24, border: '3px solid #ccc', borderLeft: 'none', borderRadius: '0 9px 9px 0' }} />
+
+          {/* Steam rising from cup */}
+          {[0,1,2,3,4,5].map(i => (
+            <div key={i} style={{
+              position: 'absolute',
+              bottom: 70 + (i % 3) * 6,
+              left: `calc(50% + ${[-13,-4,5,9,-8,1][i]}px)`,
+              width: i % 2 === 0 ? 5 : 4,
+              height: i % 2 === 0 ? 5 : 4,
+              borderRadius: '50%',
+              background: 'rgba(255,248,235,0.55)',
+              animation: `steamRise ${1.8 + i * 0.35}s ease-out infinite`,
+              animationDelay: `${i * 0.28}s`,
+              ['--sx' as string]: `${[-9,6,-6,10,-5,8][i]}px`,
+            } as any} />
+          ))}
+
+          {/* Pour stream — starts at jug spout, angles into cup */}
           {sp < 0.94 && (
-            <div style={{ position: 'absolute', top: 14, left: '60%', width: 6, height: `${32+sp*32}px`, background: 'linear-gradient(180deg,rgba(252,242,222,0.95),rgba(230,210,178,0.85))', borderRadius: 3, transform: 'rotate(14deg)', transformOrigin: 'top center', animation: 'pourWiggle 0.45s ease-in-out infinite', boxShadow: '0 0 8px rgba(230,210,178,0.5)' }} />
+            <div style={{ position: 'absolute', top: 8, left: 100, width: 6, height: 82, background: 'linear-gradient(180deg,rgba(252,242,222,0.96),rgba(230,212,180,0.88))', borderRadius: '3px 3px 2px 2px', transform: 'rotate(-8deg)', transformOrigin: 'top center', animation: 'pourWiggle 0.45s ease-in-out infinite', boxShadow: '0 0 8px rgba(230,210,178,0.45)' }} />
           )}
+
           {/* Tilted jug */}
-          <div style={{ position: 'absolute', top: 0, right: 0, width: 50, height: 65,
+          <div style={{ position: 'absolute', top: 0, right: 4, width: 52, height: 68,
             background: 'linear-gradient(135deg,#c6c6c6 0%,#dedede 32%,#bfbfbf 100%)',
             borderRadius: '5px 11px 4px 4px',
             boxShadow: 'inset -4px 0 8px rgba(0,0,0,0.1), 0 4px 12px rgba(0,0,0,0.35)',
-            transform: `rotate(${-22-sp*10}deg)`, transformOrigin: 'bottom left', transition: 'transform 2s ease',
+            transform: `rotate(${-24-sp*10}deg)`, transformOrigin: 'bottom left', transition: 'transform 2s ease',
             overflow: 'hidden',
           }}>
             <div style={{ position: 'absolute', bottom: 3, left: 3, right: 3, height: `${(1-sp)*58+4}%`, background: 'rgba(255,252,244,0.82)', borderRadius: '0 0 2px 2px', transition: 'height 2s ease' }} />
+            <div style={{ position: 'absolute', top: 6, left: 5, width: 8, height: 22, borderRadius: '50%', background: 'rgba(255,255,255,0.18)', transform: 'rotate(-12deg)' }} />
           </div>
         </div>
       </div>
@@ -277,6 +300,7 @@ function PlantScene({ progress }: { progress: number }) {
         @keyframes bloomIn{from{opacity:0;transform:scale(0) rotate(-20deg)}to{opacity:1;transform:scale(1) rotate(0deg)}}
         @keyframes lightRay{0%,100%{opacity:${lightRayOpacity * 0.6}}50%{opacity:${lightRayOpacity}}}
         @keyframes stemGrow{from{scaleY:0}to{scaleY:1}}
+        @keyframes dewSparkle{0%,100%{opacity:0;transform:scale(0) rotate(0deg)}40%{opacity:0.9;transform:scale(1) rotate(200deg)}75%{opacity:0.3;transform:scale(0.6) rotate(340deg)}}
       `}</style>
 
       {/* Light ray from above */}
@@ -382,6 +406,22 @@ function PlantScene({ progress }: { progress: number }) {
           <FlowerBlossom />
         </div>
       )}
+      {/* Flower sparkle dewdrops */}
+      {showFlower && [0,1,2,3,4,5,6].map(i => (
+        <div key={i} style={{
+          position: 'absolute',
+          bottom: 52 + stemH - 32 + [40,58,50,44,62,36,54][i],
+          left: `calc(50% + ${[-40,-22,24,42,-52,20,-32][i]}px)`,
+          width: i % 2 === 0 ? 5 : 4,
+          height: i % 2 === 0 ? 5 : 4,
+          borderRadius: '50%',
+          background: ['#fda4af','#fecdd3','#fef08a','#f59e0b','#fbcfe8','#fda4af','#fef9c3'][i],
+          boxShadow: `0 0 5px ${['#fda4af','#fecdd3','#fef08a','#f59e0b','#fbcfe8','#fda4af','#fef9c3'][i]}`,
+          animation: `dewSparkle ${1.4 + i * 0.38}s ease-in-out infinite`,
+          animationDelay: `${i * 0.3}s`,
+          pointerEvents: 'none',
+        }} />
+      ))}
     </div>
   )
 }
@@ -930,6 +970,7 @@ function CandleScene({ progress }: { progress: number }) {
         @keyframes waxDrip2{0%{height:0;opacity:0.8}80%{height:16px;opacity:0.7}100%{height:18px;opacity:0.1}}
         @keyframes candleGlow{0%,100%{opacity:0.52;transform:scale(1)}35%{opacity:0.88;transform:scale(1.1)}70%{opacity:0.62;transform:scale(0.95)}}
         @keyframes wallGlow{0%,100%{opacity:0.35}50%{opacity:0.6}}
+        @keyframes emberRise{0%{transform:translateY(0) translateX(0);opacity:0.85}30%{opacity:0.5}100%{transform:translateY(-88px) translateX(var(--ex,5px));opacity:0}}
       `}</style>
 
       {/* Wide wall glow */}
@@ -1066,6 +1107,23 @@ function CandleScene({ progress }: { progress: number }) {
           animation: 'coreFlame 0.5s ease-in-out infinite',
           transformOrigin: 'bottom center', zIndex: 5,
         }} />
+        {/* Ember particles rising from flame */}
+        {[0,1,2,3,4].map(i => (
+          <div key={i} style={{
+            position: 'absolute',
+            top: -48,
+            left: `calc(50% + ${[-4,-1,2,5,-2][i]}px)`,
+            width: i % 2 === 0 ? 3 : 2,
+            height: i % 2 === 0 ? 3 : 2,
+            borderRadius: '50%',
+            background: ['#fb923c','#fbbf24','#fde68a','#fb923c','#fef3c7'][i],
+            boxShadow: '0 0 4px #fb923c',
+            animation: `emberRise ${2.4 + i * 0.72}s ease-out infinite`,
+            animationDelay: `${i * 0.58}s`,
+            zIndex: 6,
+            ['--ex' as string]: `${[-10,7,-8,13,-5][i]}px`,
+          } as any} />
+        ))}
       </div>
     </div>
   )
@@ -1229,6 +1287,18 @@ function FocusInner() {
     }, 8000)
     return () => { if (msgRef.current) clearInterval(msgRef.current) }
   }, [])
+
+  // ── Space bar to play/pause ───────────────────────────────────
+  useEffect(() => {
+    const handle = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && (e.target as HTMLElement).tagName !== 'INPUT' && (e.target as HTMLElement).tagName !== 'TEXTAREA') {
+        e.preventDefault()
+        if (!done && phase === 'work') setRunning(r => !r)
+      }
+    }
+    window.addEventListener('keydown', handle)
+    return () => window.removeEventListener('keydown', handle)
+  }, [done, phase])
 
   // ── Auto-hide controls ────────────────────────────────────────
   useEffect(() => {
@@ -1489,7 +1559,29 @@ function FocusInner() {
             style={{ background: `linear-gradient(135deg,${theme.ring[0]},${theme.ring[1]})` }}>
             Save & return →
           </button>
-          <style>{`@keyframes bdoneIn{from{transform:scale(0) rotate(-15deg);opacity:0}to{transform:scale(1) rotate(0);opacity:1}}`}</style>
+          <style>{`
+            @keyframes bdoneIn{from{transform:scale(0) rotate(-15deg);opacity:0}to{transform:scale(1) rotate(0);opacity:1}}
+            @keyframes confettiDrop{0%{transform:translateY(-20px) rotate(0deg);opacity:1}80%{opacity:0.75}100%{transform:translateY(360px) rotate(680deg);opacity:0}}
+            @keyframes confettiSway{0%,100%{transform:translateX(0)}50%{transform:translateX(var(--sw,14px))}}
+          `}</style>
+          {[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23].map(i => {
+            const COLS = ['#fbbf24','#f87171','#60a5fa','#4ade80','#f472b6','#a78bfa','#fb923c','#34d399']
+            const isRect = i % 3 !== 0
+            return (
+              <div key={i} style={{
+                position: 'absolute',
+                top: 0,
+                left: `${(i * 13 + 3) % 96}%`,
+                width: isRect ? 6 + (i % 3) * 2 : 8 + (i % 2) * 3,
+                height: isRect ? 4 + (i % 2) * 2 : 8 + (i % 2) * 3,
+                borderRadius: isRect ? 2 : '50%',
+                background: COLS[i % COLS.length],
+                animation: `confettiDrop ${1.4 + (i * 0.17) % 1.6}s ease-in ${(i * 0.11) % 1.4}s both, confettiSway ${0.9 + (i * 0.13) % 0.7}s ease-in-out ${(i * 0.11) % 1.4}s infinite`,
+                ['--sw' as string]: `${(i % 2 === 0 ? 1 : -1) * (8 + (i * 7) % 16)}px`,
+                pointerEvents: 'none',
+              } as any} />
+            )
+          })}
         </div>
       )}
 
@@ -1520,7 +1612,7 @@ function FocusInner() {
 
         {/* Timer ring */}
         <div className="relative flex items-center justify-center" style={{ width: 200, height: 200 }}>
-          <svg width="200" height="200" style={{ position: 'absolute', transform: 'rotate(-90deg)' }}>
+          <svg width="200" height="200" style={{ position: 'absolute', transform: 'rotate(-90deg)', filter: running ? `drop-shadow(0 0 10px ${theme.ring[0]}99)` : 'none', transition: 'filter 1.2s ease' }}>
             <circle cx="100" cy="100" r="88" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="8" />
             <circle cx="100" cy="100" r="88" fill="none"
               stroke="url(#timerGrad)" strokeWidth="8" strokeLinecap="round"

@@ -141,6 +141,8 @@ export default function QuestionsPage() {
   const [genPdf, setGenPdf]               = useState('')
   const [genPdfName, setGenPdfName]       = useState('')
   const [genTitle, setGenTitle]           = useState('')
+  const [genFormat, setGenFormat]         = useState('mixed')
+  const [genCount, setGenCount]           = useState('')
   const [generating, setGenerating]       = useState(false)
   const [genError, setGenError]           = useState('')
 
@@ -244,9 +246,13 @@ export default function QuestionsPage() {
     if (!genPdf || !genTitle.trim() || !userId || !selectedCourse) return
     setGenerating(true); setGenError('')
     try {
-      await api.generateQuestionBank({ user_id: userId, course_id: selectedCourse, pdf_url: genPdf, pdf_name: genPdfName, title: genTitle.trim() })
+      await api.generateQuestionBank({
+        user_id: userId, course_id: selectedCourse, pdf_url: genPdf, pdf_name: genPdfName,
+        title: genTitle.trim(), format: genFormat,
+        num_questions: genCount ? parseInt(genCount) : undefined,
+      })
       setShowGenerate(false)
-      setGenPdf(''); setGenTitle(''); setGenPdfName('')
+      setGenPdf(''); setGenTitle(''); setGenPdfName(''); setGenFormat('mixed'); setGenCount('')
       loadTopics(selectedCourse, userId)
       if (showManage) loadBanks(selectedCourse, userId)
     } catch (e: any) {
@@ -363,15 +369,15 @@ export default function QuestionsPage() {
           )}
 
           {showGenerate && (
-            <div className="flex flex-wrap gap-3 items-end max-w-2xl">
-              <div className="flex-1 min-w-40">
+            <div className="flex flex-wrap gap-3 items-end max-w-3xl">
+              <div className="flex-1 min-w-36">
                 <label className="block text-xs mb-1" style={{ color: N.muted }}>Title</label>
                 <input value={genTitle} onChange={e => setGenTitle(e.target.value)}
                   placeholder="e.g. Week 6 Notes Practice"
                   className="w-full rounded-lg border px-3 py-1.5 text-sm focus:outline-none"
                   style={{ borderColor: N.border }} />
               </div>
-              <div className="flex-1 min-w-40">
+              <div className="flex-1 min-w-36">
                 <label className="block text-xs mb-1" style={{ color: N.muted }}>PDF (from Whiteboard)</label>
                 <select value={genPdf} onChange={e => {
                   const wb = genWhiteboards.find((p: any) => p.pdf_url === e.target.value)
@@ -382,6 +388,24 @@ export default function QuestionsPage() {
                   <option value="">Select PDF…</option>
                   {genWhiteboards.map((p: any) => <option key={p.id} value={p.pdf_url}>{p.pdf_name || p.name}</option>)}
                 </select>
+              </div>
+              <div>
+                <label className="block text-xs mb-1" style={{ color: N.muted }}>Format</label>
+                <select value={genFormat} onChange={e => setGenFormat(e.target.value)}
+                  className="rounded-lg border px-3 py-1.5 text-sm focus:outline-none"
+                  style={{ borderColor: N.border }}>
+                  <option value="mixed">Mixed</option>
+                  <option value="mcq">MCQ</option>
+                  <option value="short_answer">Short answer</option>
+                  <option value="essay">Essay</option>
+                </select>
+              </div>
+              <div style={{ width: 80 }}>
+                <label className="block text-xs mb-1" style={{ color: N.muted }}>Questions</label>
+                <input value={genCount} onChange={e => setGenCount(e.target.value.replace(/\D/g, ''))}
+                  placeholder="Auto"
+                  className="w-full rounded-lg border px-3 py-1.5 text-sm focus:outline-none"
+                  style={{ borderColor: N.border }} />
               </div>
               <button onClick={handleGenerate} disabled={generating || !genPdf || !genTitle.trim()}
                 className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"

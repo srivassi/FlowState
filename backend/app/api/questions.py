@@ -25,6 +25,8 @@ class GenerateRequest(BaseModel):
     pdf_url: str
     pdf_name: Optional[str] = None
     title: Optional[str] = None
+    format: Optional[str] = None        # 'mixed' | 'mcq' | 'short_answer' | 'essay'
+    num_questions: Optional[int] = None
 
 
 class GradeRequest(BaseModel):
@@ -216,11 +218,28 @@ def generate_question_bank(body: GenerateRequest):
     if not pdf_text.strip():
         raise HTTPException(status_code=400, detail="Could not extract text from this PDF")
 
+    fmt = (body.format or 'mixed').lower()
+    count_str = f"exactly {body.num_questions}" if body.num_questions else "a comprehensive set of"
+
+    if fmt == 'mcq':
+        format_instructions = f"""Generate {count_str} multiple-choice questions (MCQ) at exam difficulty.
+- Each question must have exactly 4 options labelled A), B), C), D) on separate lines inside question_text
+- Set model_answer to the correct option letter and full text, e.g. "B) The correct answer"
+- Explanation should briefly note why the other options are wrong"""
+    elif fmt == 'short_answer':
+        format_instructions = f"""Generate {count_str} short-answer questions requiring 2–5 sentence responses at exam difficulty."""
+    elif fmt == 'essay':
+        format_instructions = f"""Generate {count_str} essay questions requiring detailed multi-paragraph responses.
+Model answers should be structured outlines with 5–8 key points."""
+    else:
+        format_instructions = f"""Generate {count_str} exam questions mixing types: definition, explain/discuss, apply/analyse, compare/contrast."""
+
     prompt = f"""You are creating an exam-style question bank from lecture notes.
 
-Generate a comprehensive set of exam questions that cover all major topics in this material. Questions should:
+{format_instructions}
+
+All questions should:
 - Be at exam difficulty level (not trivial recall)
-- Mix question types: definition, explain/discuss, apply/analyse, compare/contrast
 - Be grouped under broad topic labels — each general concept gets one topic, and many questions should share the same topic label. Do NOT create a new topic per question.
 
 For each question provide a model answer and explanation of what's being tested.

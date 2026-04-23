@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query
 from app.core.supabase import get_supabase_client
 from pydantic import BaseModel
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Literal
 import anthropic
 import os
 import io
@@ -25,7 +25,7 @@ class GenerateRequest(BaseModel):
     pdf_url: str
     pdf_name: Optional[str] = None
     title: Optional[str] = None
-    format: Optional[str] = None        # 'mixed' | 'mcq' | 'short_answer' | 'essay'
+    format: Optional[Literal['mixed', 'mcq', 'short_answer', 'essay']] = None
     num_questions: Optional[int] = None
     instructions: Optional[str] = None  # free-text user instructions
 
@@ -70,12 +70,10 @@ def _parse_questions(raw: str) -> list:
             pass
         return None
 
-    # direct parse
     result = _try(cleaned)
     if result is not None:
         return result
 
-    # find outermost array
     start = cleaned.find('[')
     end = cleaned.rfind(']')
     if start != -1 and end != -1 and end > start:
@@ -83,7 +81,6 @@ def _parse_questions(raw: str) -> list:
         if result is not None:
             return result
 
-    # truncated response — try closing the last incomplete object
     if start != -1:
         fragment = cleaned[start:]
         last_brace = fragment.rfind('}')
@@ -93,6 +90,32 @@ def _parse_questions(raw: str) -> list:
                 return result
 
     return []
+
+
+def _group_by_topic(questions: list) -> Dict[str, list]:
+    groups: Dict[str, list] = {}
+    for q in questions:
+        t = q["topic"]
+        if t not in groups:
+            groups[t] = []
+        groups[t].append(q)
+    return groups
+
+
+def _build_question_rows(questions: list, bank_id: str, source_label: str | None) -> list:
+    return [
+        {
+            "bank_id": bank_id,
+            "topic": q.get("topic", "General"),
+            "question_text": q.get("question_text", ""),
+            "model_answer": q.get("model_answer", ""),
+            "explanation": q.get("explanation", ""),
+            "source_label": source_label,
+            "order_index": i,
+        }
+        for i, q in enumerate(questions)
+        if q.get("question_text")
+    ]
 
 
 def _call_claude(prompt: str, max_tokens: int = 8000) -> str:
@@ -193,20 +216,7 @@ Exam paper:
         raise HTTPException(status_code=400, detail="Failed to create question bank")
 
     bank_id = bank.data[0]["id"]
-    rows = [
-        {
-            "bank_id": bank_id,
-            "topic": q.get("topic", "General"),
-            "question_text": q.get("question_text", ""),
-            "model_answer": q.get("model_answer", ""),
-            "explanation": q.get("explanation", ""),
-            "source_label": source_label or title,
-            "order_index": i,
-        }
-        for i, q in enumerate(questions)
-        if q.get("question_text")
-    ]
-
+    rows = _build_question_rows(questions, bank_id, source_label or title)
     supabase.table("questions").insert(rows).execute()
     return {"bank": bank.data[0], "count": len(rows)}
 
@@ -280,20 +290,7 @@ Lecture notes:
         raise HTTPException(status_code=400, detail="Failed to create question bank")
 
     bank_id = bank.data[0]["id"]
-    rows = [
-        {
-            "bank_id": bank_id,
-            "topic": q.get("topic", "General"),
-            "question_text": q.get("question_text", ""),
-            "model_answer": q.get("model_answer", ""),
-            "explanation": q.get("explanation", ""),
-            "source_label": None,
-            "order_index": i,
-        }
-        for i, q in enumerate(questions)
-        if q.get("question_text")
-    ]
-
+    rows = _build_question_rows(questions, bank_id, None)
     supabase.table("questions").insert(rows).execute()
     return {"bank": bank.data[0], "count": len(rows)}
 
@@ -352,15 +349,7 @@ def get_bank_questions(bank_id: str):
         .data or []
     )
 
-    # Group by topic
-    topics: Dict[str, list] = {}
-    for q in questions:
-        t = q["topic"]
-        if t not in topics:
-            topics[t] = []
-        topics[t].append(q)
-
-    return {"bank": bank.data[0], "topics": topics}
+    return {"bank": bank.data[0], "topics": _group_by_topic(questions)}
 
 
 # ─── Combined topic view (all banks for a course) ────────────
@@ -391,14 +380,7 @@ def get_topics_for_course(user_id: str = Query(...), course_id: str = Query(...)
         .data or []
     )
 
-    topics: Dict[str, list] = {}
-    for q in questions:
-        t = q["topic"]
-        if t not in topics:
-            topics[t] = []
-        topics[t].append(q)
-
-    return topics
+    return _group_by_topic(questions)
 
 
 # ─── Delete bank ─────────────────────────────────────────────

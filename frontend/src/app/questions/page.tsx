@@ -2,7 +2,7 @@
 
 export const dynamic = 'force-dynamic'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '../../lib/supabase'
@@ -95,8 +95,8 @@ function QuestionCard({ q, userId, onAnswered }: { q: Question; userId: string |
             const isCorr = opt.letter === correctLetter
             let st: React.CSSProperties = { borderColor: N.border, backgroundColor: N.bg, color: N.text }
             if (mcqAnswered) {
-              if (isCorr)   st = { borderColor: '#16A34A', backgroundColor: '#F0FDF4', color: '#15803D' }
-              else if (isSel) st = { borderColor: '#DC2626', backgroundColor: '#FEF2F2', color: '#B91C1C' }
+              if (isCorr)   st = { borderColor: N.green, backgroundColor: N.greenBg, color: '#15803D' }
+              else if (isSel) st = { borderColor: N.red, backgroundColor: N.redBg, color: '#B91C1C' }
               else          st = { borderColor: N.border, backgroundColor: N.sidebar, color: N.muted }
             } else if (isSel) {
               st = { borderColor: N.indigo, backgroundColor: N.indigoBg, color: N.indigo }
@@ -125,7 +125,7 @@ function QuestionCard({ q, userId, onAnswered }: { q: Question; userId: string |
 
         {mcqAnswered && (
           <div className="rounded-lg border p-3 space-y-1.5"
-            style={{ borderColor: isRight ? '#16A34A44' : '#DC262644', backgroundColor: isRight ? '#F0FDF4' : '#FEF2F2' }}>
+            style={{ borderColor: isRight ? N.green + '44' : N.red + '44', backgroundColor: isRight ? N.greenBg : N.redBg }}>
             <div className="text-sm font-semibold" style={{ color: isRight ? '#15803D' : '#B91C1C' }}>
               {isRight ? '✓ Correct!' : `✗ The correct answer is ${correctLetter}`}
             </div>
@@ -376,42 +376,31 @@ export default function QuestionsPage() {
 
   const buildScoreInstructions = (): string => {
     if (scoreEntries.length === 0) return ''
+
+    const qIdToTopic: Record<string, string> = {}
+    for (const [topic, qs] of Object.entries(topics)) {
+      for (const q of qs) qIdToTopic[q.id] = topic
+    }
+
     const parts: string[] = []
 
-    // MCQ wrong topics
-    const wrongMcqIds = Object.entries(sessionScores)
-      .filter(([, e]) => e.type === 'mcq' && !(e as Extract<AnswerEvent, { type: 'mcq' }>).correct)
-      .map(([id]) => id)
-    const wrongTopics = [...new Set(wrongMcqIds.map(id => {
-      for (const qs of Object.values(topics)) {
-        const q = qs.find(q => q.id === id)
-        if (q) return q.topic
-      }
-      return null
-    }).filter(Boolean))]
+    const wrongTopics = [...new Set(
+      Object.entries(sessionScores)
+        .filter(([, e]) => e.type === 'mcq' && !(e as Extract<AnswerEvent, { type: 'mcq' }>).correct)
+        .map(([id]) => qIdToTopic[id])
+        .filter(Boolean)
+    )]
     if (wrongTopics.length) parts.push(`The user struggled with these topics (got MCQ wrong): ${wrongTopics.join(', ')}. Prioritise more questions on these.`)
 
-    // Written low scores
-    const lowWrittenIds = Object.entries(sessionScores)
-      .filter(([, e]) => e.type === 'written' && (e as Extract<AnswerEvent, { type: 'written' }>).score <= 2)
-      .map(([id]) => id)
-    const lowTopics = [...new Set(lowWrittenIds.map(id => {
-      for (const qs of Object.values(topics)) {
-        const q = qs.find(q => q.id === id)
-        if (q) return q.topic
-      }
-      return null
-    }).filter(Boolean))]
+    const lowTopics = [...new Set(
+      Object.entries(sessionScores)
+        .filter(([, e]) => e.type === 'written' && (e as Extract<AnswerEvent, { type: 'written' }>).score <= 2)
+        .map(([id]) => qIdToTopic[id])
+        .filter(Boolean)
+    )]
     if (lowTopics.length) parts.push(`The user got low scores on written answers in: ${lowTopics.join(', ')}. Include more depth-testing questions on these.`)
 
-    // Topics not yet answered
-    const answeredTopics = new Set(Object.keys(sessionScores).map(id => {
-      for (const qs of Object.values(topics)) {
-        const q = qs.find(q => q.id === id)
-        if (q) return q.topic
-      }
-      return null
-    }).filter(Boolean))
+    const answeredTopics = new Set(Object.keys(sessionScores).map(id => qIdToTopic[id]).filter(Boolean))
     const unansweredTopics = topicList.filter(t => !answeredTopics.has(t))
     if (unansweredTopics.length && unansweredTopics.length < topicList.length) {
       parts.push(`These topics have not been practised yet: ${unansweredTopics.join(', ')}. Make sure to include questions covering them.`)
@@ -454,12 +443,20 @@ export default function QuestionsPage() {
   const totalQs   = Object.values(topics).reduce((s, qs) => s + qs.length, 0)
   const hasTopics = topicList.length > 0
 
-  const scoreEntries   = Object.values(sessionScores)
-  const mcqEntries     = scoreEntries.filter(e => e.type === 'mcq') as Extract<AnswerEvent, { type: 'mcq' }>[]
-  const writtenEntries = scoreEntries.filter(e => e.type === 'written') as Extract<AnswerEvent, { type: 'written' }>[]
-  const mcqCorrect     = mcqEntries.filter(e => e.correct).length
-  const writtenAvg     = writtenEntries.length ? writtenEntries.reduce((s, e) => s + e.score, 0) / writtenEntries.length : 0
-  const SCORE_LABEL    = ['', 'Insufficient', 'Developing', 'Good', 'Excellent']
+  const SCORE_LABEL = ['', 'Insufficient', 'Developing', 'Good', 'Excellent']
+
+  const { scoreEntries, mcqEntries, writtenEntries, mcqCorrect, writtenAvg } = useMemo(() => {
+    const entries    = Object.values(sessionScores)
+    const mcq        = entries.filter(e => e.type === 'mcq') as Extract<AnswerEvent, { type: 'mcq' }>[]
+    const written    = entries.filter(e => e.type === 'written') as Extract<AnswerEvent, { type: 'written' }>[]
+    return {
+      scoreEntries:    entries,
+      mcqEntries:      mcq,
+      writtenEntries:  written,
+      mcqCorrect:      mcq.filter(e => e.correct).length,
+      writtenAvg:      written.length ? written.reduce((s, e) => s + e.score, 0) / written.length : 0,
+    }
+  }, [sessionScores])
 
   return (
     <div className="flex h-screen flex-col" style={{ fontFamily: 'Inter, sans-serif', backgroundColor: N.sidebar, color: N.text }}>

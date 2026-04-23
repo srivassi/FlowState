@@ -81,6 +81,23 @@ class FullRescheduleRequest(BaseModel):
     overflow_strategy: str = "defer"    # "merge" | "defer" | "keep_all"
 
 
+class LogActivityRequest(BaseModel):
+    user_id: str
+    activity_type: str
+
+
+# ─── Log activity ────────────────────────────────────────────
+
+@router.post("/log-activity")
+def log_activity(body: LogActivityRequest):
+    supabase = get_supabase_client()
+    supabase.table("study_activity").insert({
+        "user_id": body.user_id,
+        "activity_type": body.activity_type,
+    }).execute()
+    return {"ok": True}
+
+
 # ─── Pomodoro ───────────────────────────────────────────────
 
 @router.post("/pomodoro/start")
@@ -210,14 +227,33 @@ def get_stats(user_id: str):
 
     total_focus_minutes = sum(s["duration_minutes"] for s in sessions)
 
-    # Streak calculation — consecutive days ending today or yesterday
-    completed_dates = sorted(set(
+    # Pull gauntlet sessions and question answer activity for streak/graph
+    gauntlet_sessions = (
+        supabase.table("gauntlet_sessions")
+        .select("created_at")
+        .eq("user_id", user_id)
+        .execute()
+    ).data or []
+
+    study_activity = (
+        supabase.table("study_activity")
+        .select("created_at")
+        .eq("user_id", user_id)
+        .execute()
+    ).data or []
+
+    # Merge all activity dates
+    all_activity_dates = set(
         s["completed_at"][:10] for s in sessions if s.get("completed_at")
-    ), reverse=True)
+    )
+    all_activity_dates.update(s["created_at"][:10] for s in gauntlet_sessions if s.get("created_at"))
+    all_activity_dates.update(a["created_at"][:10] for a in study_activity if a.get("created_at"))
+
+    # Streak calculation — consecutive days ending today or yesterday
+    completed_dates = sorted(all_activity_dates, reverse=True)
 
     streak = 0
     today = date.today()
-    # Allow streak to count if most recent session was today or yesterday
     check = today if (completed_dates and _parse_date(completed_dates[0]) == today) else today - timedelta(days=1)
     for d_str in completed_dates:
         d = _parse_date(d_str)
@@ -227,12 +263,27 @@ def get_stats(user_id: str):
         elif d < check:
             break
 
-    # Weekly pomodoros (last 7 days)
+    # Weekly activity (last 7 days) — all event types combined
+    pomo_by_day = {}
+    for s in sessions:
+        d = s.get("completed_at", "")[:10]
+        if d:
+            pomo_by_day[d] = pomo_by_day.get(d, 0) + 1
+
+    other_by_day = {}
+    for s in gauntlet_sessions:
+        d = s.get("created_at", "")[:10]
+        if d:
+            other_by_day[d] = other_by_day.get(d, 0) + 1
+    for a in study_activity:
+        d = a.get("created_at", "")[:10]
+        if d:
+            other_by_day[d] = other_by_day.get(d, 0) + 1
+
     weekly = []
     for i in range(6, -1, -1):
         day = (date.today() - timedelta(days=i)).isoformat()
-        count = sum(1 for s in sessions if s.get("completed_at", "")[:10] == day)
-        weekly.append({"date": day, "count": count})
+        weekly.append({"date": day, "count": pomo_by_day.get(day, 0) + other_by_day.get(day, 0)})
 
     return {
         "tasks_completed": len(tasks_done),

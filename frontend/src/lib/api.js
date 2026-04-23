@@ -43,6 +43,7 @@ export const api = {
   // ── Study / Pomodoro ──────────────────────────────────
   getTodayPlan: (userId) => req(`/study/today/${userId}`),
   getStats: (userId) => req(`/study/stats/${userId}`),
+  logActivity: (userId, activityType) => req('/study/log-activity', { method: 'POST', body: JSON.stringify({ user_id: userId, activity_type: activityType }) }),
   startPomodoro: (data) => req('/study/pomodoro/start', { method: 'POST', body: JSON.stringify(data) }),
   completePomodoro: (sessionId, notes) => req('/study/pomodoro/complete', { method: 'POST', body: JSON.stringify({ session_id: sessionId, notes }) }),
   getSessions: (userId) => req(`/study/pomodoro/sessions/${userId}`),

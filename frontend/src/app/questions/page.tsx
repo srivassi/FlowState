@@ -48,7 +48,7 @@ function mcqCorrectLetter(modelAnswer: string) {
   return modelAnswer.trim().match(/^([A-D])\)/)?.[1] ?? ''
 }
 
-function QuestionCard({ q, onAnswered }: { q: Question; onAnswered?: (e: AnswerEvent) => void }) {
+function QuestionCard({ q, userId, onAnswered }: { q: Question; userId: string | null; onAnswered?: (e: AnswerEvent) => void }) {
   const mcq          = parseMCQ(q.question_text)
   const correctLetter = mcq ? mcqCorrectLetter(q.model_answer) : ''
 
@@ -66,6 +66,7 @@ function QuestionCard({ q, onAnswered }: { q: Question; onAnswered?: (e: AnswerE
       const result = await api.gradeAnswer({ question_text: q.question_text, user_answer: attempt, topic: q.topic })
       setGrade(result)
       onAnswered?.({ type: 'written', score: result.score })
+      if (userId) api.logActivity(userId, 'question_answered').catch(() => {})
     } catch (e: any) {
       alert(e.message || 'Grading failed')
     } finally {
@@ -115,7 +116,7 @@ function QuestionCard({ q, onAnswered }: { q: Question; onAnswered?: (e: AnswerE
         </div>
 
         {!mcqAnswered && (
-          <button onClick={() => { setMcqAnswered(true); onAnswered?.({ type: 'mcq', correct: mcqPick === correctLetter }) }} disabled={!mcqPick}
+          <button onClick={() => { setMcqAnswered(true); onAnswered?.({ type: 'mcq', correct: mcqPick === correctLetter }); if (userId) api.logActivity(userId, 'question_answered').catch(() => {}) }} disabled={!mcqPick}
             className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
             style={{ backgroundColor: N.indigo }}>
             Check
@@ -724,7 +725,7 @@ export default function QuestionsPage() {
             )}
 
             <h2 className="text-base font-semibold" style={{ color: N.text }}>{activeTopic}</h2>
-            {activeQs.map(q => <QuestionCard key={q.id} q={q} onAnswered={e => handleAnswered(q.id, e)} />)}
+            {activeQs.map(q => <QuestionCard key={q.id} q={q} userId={userId} onAnswered={e => handleAnswered(q.id, e)} />)}
           </div>
         </div>
       )}

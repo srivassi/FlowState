@@ -540,41 +540,48 @@ export default function Dashboard() {
           {/* ── Overview ── */}
           {!selectedCourse && (
             <>
-              {/* Stats */}
+              {/* Stats + chart combined card */}
               {stats && (
-                <div className="mb-8 grid grid-cols-4 gap-4">
-                  {[
-                    { icon: '🎯', value: stats.tasks_completed, label: 'Tasks done' },
-                    { icon: '⏱️', value: `${Math.round(stats.total_focus_minutes / 60)}h`, label: 'Focus time' },
-                    { icon: '🔥', value: stats.streak_days, label: 'Day streak' },
-                    { icon: '🍅', value: stats.weekly_pomodoros.reduce((s, d) => s + d.count, 0), label: 'Pomodoros this week' },
-                  ].map((s, i) => (
-                    <div key={i} className="p-4" style={{ border: `1px solid ${NOTION.border}`, borderRadius: 4 }}>
-                      <div className="mb-1 text-2xl">{s.icon}</div>
-                      <div className="text-xl font-semibold" style={{ color: NOTION.text }}>{s.value}</div>
-                      <div className="text-xs" style={{ color: NOTION.muted }}>{s.label}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
+                <div className="mb-8 rounded-2xl border p-6" style={{ borderColor: NOTION.border, backgroundColor: NOTION.bg }}>
+                  {/* Stat pills */}
+                  <div className="grid grid-cols-4 gap-3 mb-8">
+                    {[
+                      { icon: '🎯', value: stats.tasks_completed, label: 'Tasks done', accent: '#6366F1', accentBg: '#EEF2FF' },
+                      { icon: '⏱️', value: `${Math.round(stats.total_focus_minutes / 60)}h`, label: 'Focus time', accent: '#0EA5E9', accentBg: '#F0F9FF' },
+                      { icon: '🔥', value: stats.streak_days, label: 'Day streak', accent: stats.streak_days > 0 ? '#F59E0B' : NOTION.muted, accentBg: stats.streak_days > 0 ? '#FFFBEB' : NOTION.sidebar },
+                      { icon: '📚', value: stats.weekly_pomodoros.reduce((s, d) => s + d.count, 0), label: 'This week', accent: '#10B981', accentBg: '#ECFDF5' },
+                    ].map((s, i) => (
+                      <div key={i} className="rounded-xl p-4 flex flex-col gap-1" style={{ backgroundColor: s.accentBg }}>
+                        <div className="text-xl">{s.icon}</div>
+                        <div className="text-2xl font-bold tracking-tight" style={{ color: s.accent }}>{s.value}</div>
+                        <div className="text-xs font-medium" style={{ color: s.accent + 'bb' }}>{s.label}</div>
+                      </div>
+                    ))}
+                  </div>
 
-              {/* Weekly chart */}
-              {stats?.weekly_pomodoros && (
-                <div className="mb-8 p-6" style={{ border: `1px solid ${NOTION.border}`, borderRadius: 4 }}>
-                  <h2 className="mb-4 text-2xl font-semibold" style={{ color: NOTION.text }}>Weekly Pomodoros</h2>
-                  <div className="flex items-end gap-3" style={{ height: 100 }}>
+                  {/* Bar chart */}
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: NOTION.muted }}>Weekly Activity</span>
+                    <span className="text-xs" style={{ color: NOTION.muted }}>
+                      {stats.weekly_pomodoros.reduce((s, d) => s + d.count, 0)} total
+                    </span>
+                  </div>
+                  <div className="flex items-end gap-2" style={{ height: 80 }}>
                     {stats.weekly_pomodoros.map((d, i) => {
                       const max = Math.max(...stats.weekly_pomodoros.map(x => x.count), 1)
-                      const h = Math.max(4, (d.count / max) * 90)
-                      const isToday = d.date === (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}` })()
+                      const h = Math.max(3, (d.count / max) * 72)
+                      const todayStr = new Date().toISOString().slice(0, 10)
+                      const isToday = d.date === todayStr
                       return (
-                        <div key={i} className="flex flex-1 flex-col items-center gap-1">
-                          {d.count > 0 && <div className="text-xs" style={{ color: NOTION.muted }}>{d.count}</div>}
-                          <div className="w-full rounded-sm transition-all"
-                            style={{ height: h, backgroundColor: isToday ? NOTION.text : '#D3D1CB', borderRadius: 2 }} />
-                          <div className="text-xs" style={{ color: NOTION.muted }}>
-                            {new Date(d.date).toLocaleDateString('en-GB', { weekday: 'short' }).slice(0, 2)}
-                          </div>
+                        <div key={i} className="flex flex-1 flex-col items-center gap-1.5">
+                          {d.count > 0 && (
+                            <span className="text-xs font-medium" style={{ color: isToday ? '#6366F1' : NOTION.muted }}>{d.count}</span>
+                          )}
+                          <div className="w-full rounded-md transition-all duration-300"
+                            style={{ height: h, backgroundColor: isToday ? '#6366F1' : '#E0E0DA' }} />
+                          <span className="text-xs font-medium" style={{ color: isToday ? '#6366F1' : NOTION.muted }}>
+                            {new Date(d.date + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'short' }).slice(0, 2)}
+                          </span>
                         </div>
                       )
                     })}

@@ -141,7 +141,7 @@ export default function Dashboard() {
       setUserName(name)
       const [plan, statsData, coursesData, profileData] = await Promise.all([
         api.getTodayPlan(uid).catch(() => ({ tasks: [] })),
-        api.getStats(uid).catch(() => null),
+        api.getStats(uid).catch((e) => { console.error('[stats] failed:', e); return null }),
         api.getCourses(uid).catch(() => []),
         api.getProfile(uid).catch(() => null),
       ])
@@ -184,7 +184,7 @@ export default function Dashboard() {
       setTodayTasks(prev => prev.map(t => t.id === activeTask?.id ? { ...t, status: 'done' } : t))
       setCourseTasks(prev => prev.map(t => t.id === activeTask?.id ? { ...t, status: 'done' } : t))
       setActiveTask(null); setActiveSessionId(null); setSessionNotes('')
-      const s = await api.getStats(userId); setStats(s)
+      const s = await api.getStats(userId).catch((e) => { console.error('[stats] failed:', e); return null }); if (s) setStats(s)
     } catch (e) { console.error(e) }
   }
 
@@ -214,7 +214,7 @@ export default function Dashboard() {
   const moveTask = async (task: Task, status: Task['status']) => {
     await api.updateTaskStatus(task.id, status)
     setCourseTasks(prev => prev.map(t => t.id === task.id ? { ...t, status } : t))
-    if (userId) api.getStats(userId).then(s => setStats(s)).catch(() => {})
+    if (userId) api.getStats(userId).then(s => setStats(s)).catch((e) => console.error('[stats] failed:', e))
   }
 
   const addTask = async (status: string = 'todo') => {

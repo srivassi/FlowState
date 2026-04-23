@@ -227,20 +227,25 @@ def get_stats(user_id: str):
 
     total_focus_minutes = sum(s["duration_minutes"] for s in sessions)
 
-    # Pull gauntlet sessions and question answer activity for streak/graph
-    gauntlet_sessions = (
-        supabase.table("gauntlet_sessions")
-        .select("created_at")
-        .eq("user_id", user_id)
-        .execute()
-    ).data or []
+    try:
+        gauntlet_sessions = (
+            supabase.table("gauntlet_sessions")
+            .select("created_at")
+            .eq("user_id", user_id)
+            .execute()
+        ).data or []
+    except Exception:
+        gauntlet_sessions = []
 
-    study_activity = (
-        supabase.table("study_activity")
-        .select("created_at")
-        .eq("user_id", user_id)
-        .execute()
-    ).data or []
+    try:
+        study_activity = (
+            supabase.table("study_activity")
+            .select("created_at")
+            .eq("user_id", user_id)
+            .execute()
+        ).data or []
+    except Exception:
+        study_activity = []
 
     # Merge all activity dates
     all_activity_dates = set(

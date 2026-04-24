@@ -74,6 +74,7 @@ export const api = {
   deleteQuestionBank: (bankId) => req(`/questions/banks/${bankId}`, { method: 'DELETE' }),
   generateQuestionBank: (data) => req('/questions/generate', { method: 'POST', body: JSON.stringify(data) }),
   gradeAnswer: (data) => req('/questions/grade', { method: 'POST', body: JSON.stringify(data) }),
+  reextractBank: (bankId) => req(`/questions/banks/${bankId}/reextract`, { method: 'POST' }),
 
   // ── Gauntlet ──────────────────────────────────────────────────
   gauntletStart: (pdfUrl, roomId) => req('/tutor/start', { method: 'POST', body: JSON.stringify({ pdf_url: pdfUrl, room_id: roomId || null }) }),

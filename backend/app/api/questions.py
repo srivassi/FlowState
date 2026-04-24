@@ -9,6 +9,12 @@ import json
 import re
 
 try:
+    import fitz  # PyMuPDF
+    HAS_FITZ = True
+except ImportError:
+    HAS_FITZ = False
+
+try:
     import pypdf
     HAS_PYPDF = True
 except ImportError:
@@ -38,7 +44,25 @@ class GradeRequest(BaseModel):
 
 # ─── Helpers ─────────────────────────────────────────────────
 
+def _pdf_page_images(file_bytes: bytes, dpi: int = 150) -> list[str]:
+    """Render each PDF page to a base64 PNG. Requires PyMuPDF."""
+    import base64
+    doc = fitz.open(stream=file_bytes, filetype="pdf")
+    zoom = dpi / 72
+    mat = fitz.Matrix(zoom, zoom)
+    return [
+        base64.b64encode(page.get_pixmap(matrix=mat).tobytes("png")).decode()
+        for page in doc
+    ]
+
+
 def _extract_pdf_text(file_bytes: bytes) -> str:
+    if HAS_FITZ:
+        doc = fitz.open(stream=file_bytes, filetype="pdf")
+        return "\n\n".join(
+            f"[Page {i+1}]\n{page.get_text() or ''}"
+            for i, page in enumerate(doc)
+        )
     reader = pypdf.PdfReader(io.BytesIO(file_bytes))
     return "\n\n".join(
         f"[Page {i+1}]\n{page.extract_text() or ''}"
@@ -54,6 +78,30 @@ def _fetch_url_pdf_text(pdf_url: str) -> str:
         return _extract_pdf_text(r.content)
     except Exception:
         return ""
+
+
+def _call_claude_vision(images_b64: list[str], prompt: str, max_tokens: int = 8192) -> str:
+    """Call Claude with page images + a text prompt. Falls back to text-only if no images."""
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not set")
+    client = anthropic.Anthropic(api_key=api_key)
+
+    content: list = []
+    for i, b64 in enumerate(images_b64[:30]):  # cap at 30 pages
+        content.append({"type": "text", "text": f"[Page {i+1}]"})
+        content.append({
+            "type": "image",
+            "source": {"type": "base64", "media_type": "image/png", "data": b64},
+        })
+    content.append({"type": "text", "text": prompt})
+
+    msg = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=max_tokens,
+        messages=[{"role": "user", "content": content}],
+    )
+    return msg.content[0].text.strip()
 
 
 def _parse_questions(raw: str) -> list:
@@ -133,64 +181,98 @@ def _call_claude(prompt: str, max_tokens: int = 8000) -> str:
 
 # ─── Extract from past paper ─────────────────────────────────
 
+_EXTRACT_PROMPT = """You are processing an exam past paper. The pages are shown as images — read them carefully, including all diagrams, FSA/automata, tables, graphs, and figures.
+
+Extract every question exactly as written. Do not paraphrase.
+
+For each question:
+- Assign a broad topic label shared across questions on the same concept (e.g. "Finite Automata", "Search Algorithms"). Do NOT create a new topic per question.
+- If a question has sub-parts (a, b, c…), extract each as a separate question, prefixed with enough parent context to be self-contained.
+- If the question references a diagram, FSA, table, or figure that appears on the page, set "diagram_page" to the 1-based page number where it appears. The actual image will be shown to the student automatically — do NOT describe it in question_text.
+- Write a model answer (2-5 sentences). For diagram questions, base it on what you can see.
+- Add a one-sentence explanation of the key concept being tested.
+
+CRITICAL JSON RULES:
+- Return ONLY a valid JSON array, no text before or after
+- Every string value on one line — use \\n for line breaks, not literal newlines
+- Escape backslashes as \\\\ and double quotes inside strings as \\"
+- No triple backticks or markdown anywhere
+
+[
+  {
+    "topic": "Topic name",
+    "question_text": "Exact question text",
+    "model_answer": "Model answer",
+    "explanation": "Key concept tested",
+    "diagram_page": null
+  }
+]
+
+Set "diagram_page" to the page number (integer) if the question references a visual element on that page, otherwise null."""
+
+
+def _run_extraction(content: bytes, source_label: str) -> tuple[list, str]:
+    """Run Claude extraction on PDF bytes. Returns (questions, raw_response)."""
+    if HAS_FITZ:
+        try:
+            images = _pdf_page_images(content)
+            raw = _call_claude_vision(images, _EXTRACT_PROMPT + f'\n\nSource: "{source_label}"', max_tokens=8192)
+            return _parse_questions(raw), raw
+        except Exception:
+            pass
+    pdf_text = _extract_pdf_text(content)
+    if not pdf_text.strip():
+        raise HTTPException(status_code=400, detail="No text could be extracted from the PDF")
+    raw = _call_claude(_EXTRACT_PROMPT + f'\n\nSource: "{source_label}"\n\nExam paper:\n{pdf_text[:60000]}', max_tokens=8192)
+    return _parse_questions(raw), raw
+
+
+def _upload_page_images(supabase, content: bytes, user_id: str, course_id: str, filename: str) -> dict[int, str]:
+    """Render and upload page PNGs. Returns {1-based page: public_url}."""
+    if not HAS_FITZ:
+        return {}
+    import base64
+    page_urls: dict[int, str] = {}
+    try:
+        images = _pdf_page_images(content)
+        for i, img_b64 in enumerate(images):
+            path = f"{user_id}/{course_id}/pages/{filename}/page_{i+1}.png"
+            try:
+                supabase.storage.from_("past-papers").upload(
+                    path, base64.b64decode(img_b64),
+                    {"content-type": "image/png", "upsert": "true"}
+                )
+                page_urls[i + 1] = supabase.storage.from_("past-papers").get_public_url(path)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return page_urls
+
+
+def _embed_diagram_urls(questions: list, page_urls: dict[int, str]) -> None:
+    """Mutates questions in-place: prepends [diagram:url] to question_text where diagram_page is set."""
+    for q in questions:
+        pg = q.get("diagram_page")
+        if pg and isinstance(pg, int) and pg in page_urls:
+            q["question_text"] = f"[diagram:{page_urls[pg]}]\n{q['question_text']}"
+
+
 @router.post("/extract")
 def extract_from_past_paper(
     file: UploadFile = File(...),
     user_id: str = Form(...),
     course_id: str = Form(...),
     title: str = Form(...),
-    source_label: str = Form(default=""),   # e.g. "2025"
+    source_label: str = Form(default=""),
 ):
-    if not HAS_PYPDF:
-        raise HTTPException(status_code=500, detail="pypdf not available")
+    if not HAS_FITZ and not HAS_PYPDF:
+        raise HTTPException(status_code=500, detail="PDF parsing library not available")
 
     content = file.file.read()
-    try:
-        pdf_text = _extract_pdf_text(content)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Could not read PDF: {e}")
-
-    if not pdf_text.strip():
-        raise HTTPException(status_code=400, detail="No text could be extracted from the PDF")
-
-    prompt = f"""You are processing an exam past paper. Extract every question from this paper exactly as written — preserve the original wording faithfully. Do not paraphrase.
-
-For each question:
-- Assign a topic based on the broad subject area (e.g. "Search Algorithms", "Markov Decision Processes", "Neural Networks"). Each general concept in the paper gets one topic label — do NOT create a separate topic per question or sub-part. Multiple questions must share the same topic label where they cover the same concept.
-- If a question has sub-parts (a, b, c), extract each sub-part as a separate question. Prefix it with enough parent context to make it self-contained — include the full parent question stem and any earlier sub-parts that this one references or builds on (e.g. "Given the Prolog KB defined above... (c) Using your answer from (b), explain...")
-- Write a concise but complete model answer (2-5 sentences is fine)
-- Add a one-sentence explanation of the key concept being tested
-
-CRITICAL JSON RULES — you must follow these exactly:
-- Return ONLY a valid JSON array, absolutely no text before or after
-- Every string value must be on one line — no literal newlines inside strings, use \\n instead
-- Escape all backslashes as \\\\ and all double quotes inside strings as \\"
-- If question text contains code, keep it inline using \\n for line breaks
-- Do not use triple backticks or markdown anywhere in your response
-
-[
-  {{
-    "topic": "Topic name",
-    "question_text": "Exact question text (use \\n for line breaks in code)",
-    "model_answer": "Concise model answer",
-    "explanation": "Key concept tested"
-  }}
-]
-
-Source: "{source_label or title}"
-
-Exam paper:
-{pdf_text[:60000]}"""
-
-    raw = _call_claude(prompt, max_tokens=8192)
-    questions = _parse_questions(raw)
-
-    if not questions:
-        raise HTTPException(status_code=500, detail=f"Could not parse questions. Claude raw (first 500): {raw[:500]!r}")
-
     supabase = get_supabase_client()
 
-    # Upload PDF to Supabase Storage
+    # Upload PDF
     pdf_url = None
     try:
         storage_path = f"{user_id}/{course_id}/{file.filename}"
@@ -200,7 +282,16 @@ Exam paper:
         )
         pdf_url = supabase.storage.from_("past-papers").get_public_url(storage_path)
     except Exception:
-        pass  # storage failure is non-fatal; questions still saved
+        pass
+
+    # Upload page images and extract
+    page_urls = _upload_page_images(supabase, content, user_id, course_id, file.filename)
+    questions, raw = _run_extraction(content, source_label or title)
+
+    if not questions:
+        raise HTTPException(status_code=500, detail=f"Could not parse questions. Claude raw (first 500): {raw[:500]!r}")
+
+    _embed_diagram_urls(questions, page_urls)
 
     bank = supabase.table("question_banks").insert({
         "user_id": user_id,
@@ -219,6 +310,37 @@ Exam paper:
     rows = _build_question_rows(questions, bank_id, source_label or title)
     supabase.table("questions").insert(rows).execute()
     return {"bank": bank.data[0], "count": len(rows)}
+
+
+@router.post("/banks/{bank_id}/reextract")
+def reextract_bank(bank_id: str):
+    supabase = get_supabase_client()
+    bank_row = supabase.table("question_banks").select("*").eq("id", bank_id).execute()
+    if not bank_row.data:
+        raise HTTPException(status_code=404, detail="Bank not found")
+    bank = bank_row.data[0]
+
+    if not bank.get("pdf_url"):
+        raise HTTPException(status_code=400, detail="No PDF stored for this bank")
+
+    import requests as _req
+    r = _req.get(bank["pdf_url"], timeout=30)
+    r.raise_for_status()
+    content = r.content
+    filename = bank.get("pdf_name") or "paper.pdf"
+
+    page_urls = _upload_page_images(supabase, content, bank["user_id"], bank["course_id"], filename)
+    questions, raw = _run_extraction(content, bank.get("source_label") or bank["title"])
+
+    if not questions:
+        raise HTTPException(status_code=500, detail=f"Re-extraction failed. Raw (first 500): {raw[:500]!r}")
+
+    _embed_diagram_urls(questions, page_urls)
+
+    supabase.table("questions").delete().eq("bank_id", bank_id).execute()
+    rows = _build_question_rows(questions, bank_id, bank.get("source_label"))
+    supabase.table("questions").insert(rows).execute()
+    return {"bank": bank, "count": len(rows)}
 
 
 # ─── Generate from notes PDF ─────────────────────────────────

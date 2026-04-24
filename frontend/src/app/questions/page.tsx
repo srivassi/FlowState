@@ -19,7 +19,7 @@ const N = {
 }
 
 type Course  = { id: string; name: string; color: string }
-type Bank    = { id: string; title: string; source_type: string; source_label: string | null; created_at: string; question_count: number }
+type Bank    = { id: string; title: string; source_type: string; source_label: string | null; created_at: string; question_count: number; pdf_url: string | null }
 type Question = { id: string; bank_id: string; topic: string; question_text: string; model_answer: string; explanation: string; source_label: string | null }
 type GradeResult = { grade: string; score: number; feedback: string; what_was_good: string; what_to_improve: string }
 type AnswerEvent = { type: 'mcq'; correct: boolean } | { type: 'written'; score: number }
@@ -48,8 +48,14 @@ function mcqCorrectLetter(modelAnswer: string) {
   return modelAnswer.trim().match(/^([A-D])\)/)?.[1] ?? ''
 }
 
+const DIAGRAM_RE = /^\[diagram:(https?:\/\/[^\]]+)\]\n?/
+
 function QuestionCard({ q, userId, onAnswered }: { q: Question; userId: string | null; onAnswered?: (e: AnswerEvent) => void }) {
-  const mcq          = parseMCQ(q.question_text)
+  const diagramMatch  = q.question_text.match(DIAGRAM_RE)
+  const diagramUrl    = diagramMatch?.[1] ?? null
+  const cleanText     = diagramMatch ? q.question_text.slice(diagramMatch[0].length) : q.question_text
+
+  const mcq          = parseMCQ(cleanText)
   const correctLetter = mcq ? mcqCorrectLetter(q.model_answer) : ''
 
   const [mcqPick, setMcqPick]       = useState('')
@@ -84,6 +90,9 @@ function QuestionCard({ q, userId, onAnswered }: { q: Question; userId: string |
     const isRight = mcqPick === correctLetter
     return (
       <div className="rounded-xl border p-5 space-y-3" style={{ borderColor: N.border, backgroundColor: N.bg }}>
+        {diagramUrl && (
+          <img src={diagramUrl} alt="Diagram" className="max-w-full rounded-lg" style={{ maxHeight: 300, objectFit: 'contain' }} />
+        )}
         <div className="flex items-start justify-between gap-3">
           <div className="text-sm leading-relaxed flex-1" style={{ color: N.text }}>{renderNote(mcq.stem)}</div>
           {sourceLabel}
@@ -148,8 +157,11 @@ function QuestionCard({ q, userId, onAnswered }: { q: Question; userId: string |
   const gs = grade ? (GRADE_STYLE[grade.grade] || GRADE_STYLE.Developing) : null
   return (
     <div className="rounded-xl border p-5 space-y-3" style={{ borderColor: N.border, backgroundColor: N.bg }}>
+      {diagramUrl && (
+        <img src={diagramUrl} alt="Diagram" className="max-w-full rounded-lg" style={{ maxHeight: 300, objectFit: 'contain' }} />
+      )}
       <div className="flex items-start justify-between gap-3">
-        <div className="text-sm leading-relaxed flex-1" style={{ color: N.text }}>{renderNote(q.question_text)}</div>
+        <div className="text-sm leading-relaxed flex-1" style={{ color: N.text }}>{renderNote(cleanText)}</div>
         {sourceLabel}
       </div>
 
@@ -219,6 +231,7 @@ export default function QuestionsPage() {
   const [banks, setBanks]           = useState<Bank[]>([])
   const [loadingBanks, setLoadingBanks] = useState(false)
   const [filterBank, setFilterBank] = useState<Bank | null>(null)
+  const [reextractingId, setReextractingId] = useState<string | null>(null)
 
   // Upload form
   type PaperSlot = { id: string; file: File | null; title: string; year: string }
@@ -438,6 +451,22 @@ export default function QuestionsPage() {
     if (selectedCourse && userId) loadTopics(selectedCourse, userId)
   }
 
+  const handleReextract = async (bank: Bank) => {
+    if (!confirm(`Re-extract "${bank.title}" using vision? This will replace all existing questions.`)) return
+    setReextractingId(bank.id)
+    try {
+      await api.reextractBank(bank.id)
+      if (selectedCourse && userId) {
+        loadBanks(selectedCourse, userId)
+        loadTopics(selectedCourse, userId)
+      }
+    } catch (e: any) {
+      alert(e.message || 'Re-extraction failed')
+    } finally {
+      setReextractingId(null)
+    }
+  }
+
   const topicList = Object.keys(topics).sort()
   const activeQs  = topics[activeTopic] || []
   const totalQs   = Object.values(topics).reduce((s, qs) => s + qs.length, 0)
@@ -653,6 +682,13 @@ export default function QuestionsPage() {
                       {' · '}{bank.question_count} questions
                     </div>
                   </div>
+                  {bank.source_type === 'past_paper' && bank.pdf_url && (
+                    <button onClick={e => { e.stopPropagation(); handleReextract(bank) }}
+                      disabled={reextractingId === bank.id}
+                      className="text-xs transition hover:opacity-70 shrink-0 disabled:opacity-40" style={{ color: N.indigo }}>
+                      {reextractingId === bank.id ? 'Re-extracting…' : '↺ Re-extract'}
+                    </button>
+                  )}
                   <button onClick={e => { e.stopPropagation(); handleDeleteBank(bank.id) }}
                     className="text-xs transition hover:opacity-70 shrink-0" style={{ color: N.red }}>
                     Delete

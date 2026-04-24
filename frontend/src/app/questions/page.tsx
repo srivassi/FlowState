@@ -19,7 +19,7 @@ const N = {
 }
 
 type Course  = { id: string; name: string; color: string }
-type Bank    = { id: string; title: string; source_type: string; source_label: string | null; created_at: string; question_count: number; pdf_url: string | null }
+type Bank    = { id: string; title: string; source_type: string; source_label: string | null; created_at: string; question_count: number; pdf_url: string | null; vision_extracted: boolean }
 type Question = { id: string; bank_id: string; topic: string; question_text: string; model_answer: string; explanation: string; source_label: string | null }
 type GradeResult = { grade: string; score: number; feedback: string; what_was_good: string; what_to_improve: string }
 type AnswerEvent = { type: 'mcq'; correct: boolean } | { type: 'written'; score: number }
@@ -682,7 +682,7 @@ export default function QuestionsPage() {
                       {' · '}{bank.question_count} questions
                     </div>
                   </div>
-                  {bank.source_type === 'past_paper' && bank.pdf_url && (
+                  {bank.source_type === 'past_paper' && bank.pdf_url && !bank.vision_extracted && (
                     <button onClick={e => { e.stopPropagation(); handleReextract(bank) }}
                       disabled={reextractingId === bank.id}
                       className="text-xs transition hover:opacity-70 shrink-0 disabled:opacity-40" style={{ color: N.indigo }}>

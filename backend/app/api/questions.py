@@ -301,6 +301,7 @@ def extract_from_past_paper(
         "source_label": source_label or title,
         "pdf_url": pdf_url,
         "pdf_name": file.filename,
+        "vision_extracted": True,
     }).execute()
 
     if not bank.data:
@@ -340,6 +341,7 @@ def reextract_bank(bank_id: str):
     supabase.table("questions").delete().eq("bank_id", bank_id).execute()
     rows = _build_question_rows(questions, bank_id, bank.get("source_label"))
     supabase.table("questions").insert(rows).execute()
+    supabase.table("question_banks").update({"vision_extracted": True}).eq("id", bank_id).execute()
     return {"bank": bank, "count": len(rows)}
 
 

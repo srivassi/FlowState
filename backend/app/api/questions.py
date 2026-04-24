@@ -44,7 +44,7 @@ class GradeRequest(BaseModel):
 
 # ─── Helpers ─────────────────────────────────────────────────
 
-def _pdf_page_images(file_bytes: bytes, dpi: int = 150) -> list[str]:
+def _pdf_page_images(file_bytes: bytes, dpi: int = 200) -> list[str]:
     """Render each PDF page to a base64 PNG. Requires PyMuPDF."""
     import base64
     doc = fitz.open(stream=file_bytes, filetype="pdf")
@@ -181,34 +181,33 @@ def _call_claude(prompt: str, max_tokens: int = 8000) -> str:
 
 # ─── Extract from past paper ─────────────────────────────────
 
-_EXTRACT_PROMPT = """You are processing an exam past paper. The pages are shown as images — read them carefully, including all diagrams, FSA/automata, tables, graphs, and figures.
+_EXTRACT_PROMPT = """You are processing an exam past paper. The pages are shown as images — read every page carefully, including all diagrams, FSA/automata, tables, graphs, and figures.
 
-Extract every question exactly as written. Do not paraphrase.
+Extract EVERY numbered question (Q1, Q2, Q3 … or 1., 2., 3. …) from the paper. Each numbered question must appear exactly once.
 
 For each question:
-- Assign a broad topic label shared across questions on the same concept (e.g. "Finite Automata", "Search Algorithms"). Do NOT create a new topic per question.
-- If a question has sub-parts (a, b, c…), extract each as a separate question, prefixed with enough parent context to be self-contained.
-- If the question references a diagram, FSA, table, or figure that appears on the page, set "diagram_page" to the 1-based page number where it appears. The actual image will be shown to the student automatically — do NOT describe it in question_text.
-- Write a model answer (2-5 sentences). For diagram questions, base it on what you can see.
+- Include the COMPLETE question text exactly as written: the question stem, all lists of strings/tokens/sentences, any grammar rules or code blocks, AND the multiple-choice options (A)–(F) if present. Do NOT summarise, shorten, or omit any part.
+- If a question has sub-parts (a, b, c…), extract each sub-part as a separate question with enough parent context to be self-contained.
+- Assign a broad topic label shared across questions on the same concept (e.g. "Finite Automata", "Regular Expressions", "Context-Free Grammars"). Do NOT create a new topic per question.
+- If the question references a diagram, FSA, automaton, parse tree, table, or figure, you MUST set "diagram_page" to the 1-based page number where that visual appears. Do not leave it null when a diagram is present — the image will be shown to the student automatically.
+- Write a concise model answer: for MCQ questions state the correct letter and one sentence explaining why; for written questions use 2–4 sentences.
 - Add a one-sentence explanation of the key concept being tested.
 
 CRITICAL JSON RULES:
-- Return ONLY a valid JSON array, no text before or after
-- Every string value on one line — use \\n for line breaks, not literal newlines
-- Escape backslashes as \\\\ and double quotes inside strings as \\"
-- No triple backticks or markdown anywhere
+- Return ONLY a valid JSON array — no text before or after, no markdown, no triple backticks
+- Every string value on a single line — use \\n for line breaks inside strings, never literal newlines
+- Escape backslashes as \\\\ and double-quotes inside strings as \\"
+- Include ALL questions — do not stop early even if the list is long
 
 [
   {
     "topic": "Topic name",
-    "question_text": "Exact question text",
-    "model_answer": "Model answer",
+    "question_text": "Complete question text including all string lists and answer options",
+    "model_answer": "Correct answer with brief explanation",
     "explanation": "Key concept tested",
     "diagram_page": null
   }
-]
-
-Set "diagram_page" to the page number (integer) if the question references a visual element on that page, otherwise null."""
+]"""
 
 
 def _run_extraction(content: bytes, source_label: str) -> tuple[list, str]:

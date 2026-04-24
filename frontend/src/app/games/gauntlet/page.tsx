@@ -340,7 +340,7 @@ const handleContinue = () => {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 md:px-6">
         {currentTS?.messages.map((m, i) => {
-          if (m.role === 'user' && m.content.startsWith('[The student chose to go deeper')) {
+          if (m.role === 'user' && (m.content === '__go_deeper__' || m.content.startsWith('[The student chose to go deeper'))) {
             return (
               <div key={i} className="flex items-center gap-3 py-1">
                 <div className="flex-1 h-px" style={{ backgroundColor: N.border }} />

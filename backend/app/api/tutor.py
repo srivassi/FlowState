@@ -246,7 +246,16 @@ Otherwise respond normally with no JSON.
 
 IMPORTANT: Only include the JSON line when genuinely moving on. Never include it mid-discussion."""
 
-    messages = [*body.messages, {"role": "user", "content": body.user_message}]
+    user_msg = body.user_message
+    if user_msg == '__go_deeper__':
+        user_msg = (
+            "[The student chose to go deeper on this topic. Based on everything said so far, "
+            "probe them on specific mechanisms, edge cases, or nuances they haven't fully addressed. "
+            "Do NOT restart or re-introduce the topic — continue naturally from the conversation above. "
+            "Pick the most interesting gap in their understanding and ask a targeted question about it.]"
+        )
+
+    messages = [*body.messages, {"role": "user", "content": user_msg}]
 
     response = client.messages.create(
         model="claude-sonnet-4-6",
@@ -270,7 +279,7 @@ IMPORTANT: Only include the JSON line when genuinely moving on. Never include it
 
     updated_messages = [
         *body.messages,
-        {"role": "user", "content": body.user_message},
+        {"role": "user", "content": user_msg},
         {"role": "assistant", "content": clean_reply},
     ]
 

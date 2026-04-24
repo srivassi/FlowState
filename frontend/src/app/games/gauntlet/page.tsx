@@ -186,12 +186,12 @@ const handleContinue = () => {
 
   const handleGoAgain = () => {
     if (!pendingNext) return
-    const reset = pendingNext.statesWithStars.map((s, i) =>
-      i === currentIdx ? { ...s, messages: [], stars: null } : s
+    const kept = pendingNext.statesWithStars.map((s, i) =>
+      i === currentIdx ? { ...s, stars: null } : s
     )
     setPendingNext(null)
-    setTopicStates(reset)
-    sendTurn('', reset, currentIdx, pdfText, reset.map(s => s.topic))
+    setTopicStates(kept)
+    sendTurn('__go_deeper__', kept, currentIdx, pdfText, kept.map(s => s.topic))
   }
 
   const handleEndSession = () => {
@@ -339,22 +339,33 @@ const handleContinue = () => {
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 md:px-6">
-        {currentTS?.messages.map((m, i) => (
-          <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            {m.role === 'assistant' && (
-              <div className="mr-2 mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm"
-                style={{ backgroundColor: N.indigoBg, border: `1px solid ${N.indigo}33` }}>
-                🎓
+        {currentTS?.messages.map((m, i) => {
+          if (m.role === 'user' && m.content.startsWith('[The student chose to go deeper')) {
+            return (
+              <div key={i} className="flex items-center gap-3 py-1">
+                <div className="flex-1 h-px" style={{ backgroundColor: N.border }} />
+                <span className="text-xs font-medium px-2" style={{ color: N.indigo }}>↓ Going deeper</span>
+                <div className="flex-1 h-px" style={{ backgroundColor: N.border }} />
               </div>
-            )}
-            <div className="max-w-lg rounded-2xl px-4 py-3 text-sm leading-relaxed"
-              style={m.role === 'user'
-                ? { backgroundColor: N.indigo, color: '#fff', borderBottomRightRadius: 4 }
-                : { backgroundColor: N.bg, color: N.text, borderBottomLeftRadius: 4, border: `1px solid ${N.border}` }}>
-              {m.role === 'assistant' ? renderNote(m.content) : m.content}
+            )
+          }
+          return (
+            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              {m.role === 'assistant' && (
+                <div className="mr-2 mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm"
+                  style={{ backgroundColor: N.indigoBg, border: `1px solid ${N.indigo}33` }}>
+                  🎓
+                </div>
+              )}
+              <div className="max-w-lg rounded-2xl px-4 py-3 text-sm leading-relaxed"
+                style={m.role === 'user'
+                  ? { backgroundColor: N.indigo, color: '#fff', borderBottomRightRadius: 4 }
+                  : { backgroundColor: N.bg, color: N.text, borderBottomLeftRadius: 4, border: `1px solid ${N.border}` }}>
+                {m.role === 'assistant' ? renderNote(m.content) : m.content}
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
         {sending && (
           <div className="flex justify-start">
             <div className="mr-2 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm"

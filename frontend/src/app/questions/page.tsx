@@ -606,7 +606,7 @@ export default function QuestionsPage() {
                 <button onClick={handleGenerate} disabled={generating || !genPdf || !genTitle.trim()}
                   className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
                   style={{ backgroundColor: N.indigo }}>
-                  {generating ? 'Generating…' : (genSuccess !== null || hasTopics) ? '↺ Regenerate' : 'Generate'}
+                  {generating ? 'Generating…' : genSuccess !== null ? '↺ Regenerate' : 'Generate'}
                 </button>
                 {genSuccess !== null && (
                   <span className="text-xs font-medium" style={{ color: N.green }}>

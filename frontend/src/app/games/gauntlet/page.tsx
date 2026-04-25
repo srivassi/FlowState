@@ -166,9 +166,13 @@ export default function GauntletPage() {
     }
   }
 
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
   const handleSend = () => {
     if (!input.trim() || sending || phase !== 'active') return
-    const msg = input.trim(); setInput('')
+    const msg = input.trim()
+    setInput('')
+    if (textareaRef.current) { textareaRef.current.style.height = 'auto' }
     sendTurn(msg, topicStates, currentIdx, pdfText, topicStates.map(s => s.topic))
   }
 
@@ -412,19 +416,30 @@ const handleContinue = () => {
 
       {/* Input */}
       <div className="shrink-0 px-4 py-3 md:px-6 md:py-4" style={{ borderTop: `1px solid ${N.border}`, backgroundColor: N.bg }}>
-        <div className="flex gap-3">
-          <input
+        <div className="flex gap-3 items-end">
+          <textarea
+            ref={textareaRef}
             value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSend()}
-            placeholder="Type your answer…"
+            onChange={e => {
+              setInput(e.target.value)
+              e.target.style.height = 'auto'
+              e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`
+            }}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                handleSend()
+              }
+            }}
+            placeholder="Type your answer… (Shift+Enter for new line)"
             disabled={sending || !!pendingNext}
             autoFocus
-            className="flex-1 rounded-lg px-4 py-2.5 text-sm focus:outline-none disabled:opacity-50"
-            style={{ border: `1px solid ${N.border}`, backgroundColor: N.sidebar, color: N.text }}
+            rows={1}
+            className="flex-1 rounded-lg px-4 py-2.5 text-sm focus:outline-none disabled:opacity-50 resize-none overflow-hidden"
+            style={{ border: `1px solid ${N.border}`, backgroundColor: N.sidebar, color: N.text, lineHeight: '1.5' }}
           />
           <button onClick={handleSend} disabled={sending || !input.trim()}
-            className="rounded-lg px-5 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
+            className="rounded-lg px-5 py-2.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40 shrink-0"
             style={{ backgroundColor: N.indigo }}>
             Send
           </button>

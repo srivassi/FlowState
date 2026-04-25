@@ -125,14 +125,18 @@ def start_gauntlet(body: StartRequest):
 
     # Return cached topics if the room already has them
     if body.room_id:
-        try:
-            cached = supabase.table("gauntlet_rooms").select("topics, pdf_text").eq("id", body.room_id).execute()
-            if cached.data and cached.data[0].get("topics") and cached.data[0].get("pdf_text"):
-                row = cached.data[0]
-                return {"topics": row["topics"], "pdf_text": row["pdf_text"]}
-            # Query succeeded but no cached data — fall through to extract
-        except Exception:
-            raise HTTPException(status_code=503, detail="Could not load session data, please try again.")
+        import time
+        for attempt in range(3):
+            try:
+                cached = supabase.table("gauntlet_rooms").select("topics, pdf_text").eq("id", body.room_id).execute()
+                if cached.data and cached.data[0].get("topics") and cached.data[0].get("pdf_text"):
+                    row = cached.data[0]
+                    return {"topics": row["topics"], "pdf_text": row["pdf_text"]}
+                break  # Query succeeded but no cached data — fall through to extract
+            except Exception:
+                if attempt == 2:
+                    raise HTTPException(status_code=503, detail="Could not load session data, please try again.")
+                time.sleep(0.4 * (attempt + 1))
 
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:

@@ -407,6 +407,8 @@ Lecture notes:
         "title": title,
         "source_type": "generated",
         "source_label": None,
+        "pdf_url": body.pdf_url,
+        "pdf_name": body.pdf_name,
     }).execute()
 
     if not bank.data:

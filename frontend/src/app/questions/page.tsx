@@ -19,7 +19,7 @@ const N = {
 }
 
 type Course  = { id: string; name: string; color: string }
-type Bank    = { id: string; title: string; source_type: string; source_label: string | null; created_at: string; question_count: number; pdf_url: string | null; vision_extracted: boolean }
+type Bank    = { id: string; title: string; source_type: string; source_label: string | null; created_at: string; question_count: number; pdf_url: string | null; pdf_name: string | null; vision_extracted: boolean }
 type Question = { id: string; bank_id: string; topic: string; question_text: string; model_answer: string; explanation: string; source_label: string | null }
 type GradeResult = { grade: string; score: number; feedback: string; what_was_good: string; what_to_improve: string }
 type AnswerEvent = { type: 'mcq'; correct: boolean } | { type: 'written'; score: number }
@@ -451,6 +451,18 @@ export default function QuestionsPage() {
     if (selectedCourse && userId) loadTopics(selectedCourse, userId)
   }
 
+  const handleRegenerateFromBank = (bank: Bank) => {
+    setShowManage(false)
+    setShowExtract(false)
+    setShowGenerate(true)
+    handleLoadWhiteboards()
+    setGenTitle(bank.title)
+    setGenPdf(bank.pdf_url || '')
+    setGenPdfName(bank.pdf_name || '')
+    setGenSuccess(null)
+    setGenError('')
+  }
+
   const handleReextract = async (bank: Bank) => {
     if (!confirm(`Re-extract "${bank.title}" using vision? This will replace all existing questions.`)) return
     setReextractingId(bank.id)
@@ -631,6 +643,19 @@ export default function QuestionsPage() {
                   style={{ borderColor: N.border }} />
               </div>
 
+              {scoreEntries.length > 0 && (
+                <div className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs"
+                  style={{ backgroundColor: N.indigoBg, color: N.indigo, border: `1px solid ${N.indigo}33` }}>
+                  <span>✦</span>
+                  <span>
+                    Smart regeneration active — using your session scores
+                    {mcqEntries.length > 0 && ` (MCQ ${mcqCorrect}/${mcqEntries.length})`}
+                    {writtenEntries.length > 0 && `, avg written ${SCORE_LABEL[Math.round(writtenAvg)] || 'Developing'}`}
+                    {' '}to prioritise weak topics.
+                  </span>
+                </div>
+              )}
+
               <div className="flex items-center gap-3 flex-wrap">
                 <button onClick={handleGenerate} disabled={generating || !genPdf || !genTitle.trim()}
                   className="rounded-lg px-4 py-1.5 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
@@ -682,6 +707,12 @@ export default function QuestionsPage() {
                       {' · '}{bank.question_count} questions
                     </div>
                   </div>
+                  {bank.source_type === 'generated' && (
+                    <button onClick={e => { e.stopPropagation(); handleRegenerateFromBank(bank) }}
+                      className="text-xs transition hover:opacity-70 shrink-0" style={{ color: N.indigo }}>
+                      ↺ Regenerate
+                    </button>
+                  )}
                   {bank.source_type === 'past_paper' && bank.pdf_url && !bank.vision_extracted && (
                     <button onClick={e => { e.stopPropagation(); handleReextract(bank) }}
                       disabled={reextractingId === bank.id}

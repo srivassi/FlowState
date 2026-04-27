@@ -75,6 +75,7 @@ export const api = {
   generateQuestionBank: (data) => req('/questions/generate', { method: 'POST', body: JSON.stringify(data) }),
   gradeAnswer: (data) => req('/questions/grade', { method: 'POST', body: JSON.stringify(data) }),
   reextractBank: (bankId) => req(`/questions/banks/${bankId}/reextract`, { method: 'POST' }),
+  regenerateBank: (bankId, data) => req(`/questions/banks/${bankId}/regenerate`, { method: 'POST', body: JSON.stringify(data) }),
 
   // ── Gauntlet ──────────────────────────────────────────────────
   gauntletStart: (pdfUrl, roomId) => req('/tutor/start', { method: 'POST', body: JSON.stringify({ pdf_url: pdfUrl, room_id: roomId || null }) }),

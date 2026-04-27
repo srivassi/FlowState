@@ -420,6 +420,64 @@ Lecture notes:
     return {"bank": bank.data[0], "count": len(rows)}
 
 
+# ─── Regenerate generated bank in-place ──────────────────────
+
+class RegenerateRequest(BaseModel):
+    instructions: Optional[str] = None
+
+
+@router.post("/banks/{bank_id}/regenerate")
+def regenerate_bank(bank_id: str, body: RegenerateRequest):
+    supabase = get_supabase_client()
+    row = supabase.table("question_banks").select("*").eq("id", bank_id).execute()
+    if not row.data:
+        raise HTTPException(status_code=404, detail="Bank not found")
+    bank = row.data[0]
+
+    if not bank.get("pdf_url"):
+        raise HTTPException(status_code=400, detail="No PDF stored for this bank — cannot regenerate")
+
+    pdf_text = _fetch_url_pdf_text(bank["pdf_url"])
+    if not pdf_text.strip():
+        raise HTTPException(status_code=400, detail="Could not extract text from the stored PDF")
+
+    extra = f"\n\nAdditional instructions: {body.instructions.strip()}" if body.instructions and body.instructions.strip() else ""
+
+    prompt = f"""You are creating an exam-style question bank from lecture notes.
+
+Generate a comprehensive set of exam questions mixing types: definition, explain/discuss, apply/analyse, compare/contrast.
+
+All questions should:
+- Be at exam difficulty level (not trivial recall)
+- Be grouped under broad topic labels — each general concept gets one topic, and many questions should share the same topic label. Do NOT create a new topic per question.{extra}
+
+For each question provide a model answer and explanation of what's being tested.
+
+Return ONLY a JSON array, no other text:
+[
+  {{
+    "topic": "Topic name",
+    "question_text": "Exam question",
+    "model_answer": "Detailed model answer",
+    "explanation": "Key concepts tested"
+  }}
+]
+
+Lecture notes:
+{pdf_text[:80000]}"""
+
+    raw = _call_claude(prompt)
+    questions = _parse_questions(raw)
+
+    if not questions:
+        raise HTTPException(status_code=500, detail="Could not regenerate questions from this PDF")
+
+    supabase.table("questions").delete().eq("bank_id", bank_id).execute()
+    rows = _build_question_rows(questions, bank_id, None)
+    supabase.table("questions").insert(rows).execute()
+    return {"bank": bank, "count": len(rows)}
+
+
 # ─── List banks ──────────────────────────────────────────────
 
 @router.get("/banks")

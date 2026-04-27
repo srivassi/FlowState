@@ -232,6 +232,7 @@ export default function QuestionsPage() {
   const [loadingBanks, setLoadingBanks] = useState(false)
   const [filterBank, setFilterBank] = useState<Bank | null>(null)
   const [reextractingId, setReextractingId] = useState<string | null>(null)
+  const [regeneratingId, setRegeneratingId] = useState<string | null>(null)
 
   // Upload form
   type PaperSlot = { id: string; file: File | null; title: string; year: string }
@@ -451,16 +452,21 @@ export default function QuestionsPage() {
     if (selectedCourse && userId) loadTopics(selectedCourse, userId)
   }
 
-  const handleRegenerateFromBank = (bank: Bank) => {
-    setShowManage(false)
-    setShowExtract(false)
-    setShowGenerate(true)
-    handleLoadWhiteboards()
-    setGenTitle(bank.title)
-    setGenPdf(bank.pdf_url || '')
-    setGenPdfName(bank.pdf_name || '')
-    setGenSuccess(null)
-    setGenError('')
+  const handleRegenerateFromBank = async (bank: Bank) => {
+    if (!confirm(`Regenerate "${bank.title}"? This will replace all existing questions.`)) return
+    setRegeneratingId(bank.id)
+    try {
+      const scoreHint = scoreEntries.length > 0 ? buildScoreInstructions() : undefined
+      await api.regenerateBank(bank.id, { instructions: scoreHint })
+      if (selectedCourse && userId) {
+        loadBanks(selectedCourse, userId)
+        loadTopics(selectedCourse, userId)
+      }
+    } catch (e: any) {
+      alert(e.message || 'Regeneration failed')
+    } finally {
+      setRegeneratingId(null)
+    }
   }
 
   const handleReextract = async (bank: Bank) => {
@@ -709,8 +715,9 @@ export default function QuestionsPage() {
                   </div>
                   {bank.source_type === 'generated' && (
                     <button onClick={e => { e.stopPropagation(); handleRegenerateFromBank(bank) }}
-                      className="text-xs transition hover:opacity-70 shrink-0" style={{ color: N.indigo }}>
-                      ↺ Regenerate
+                      disabled={regeneratingId === bank.id}
+                      className="text-xs transition hover:opacity-70 shrink-0 disabled:opacity-40" style={{ color: N.indigo }}>
+                      {regeneratingId === bank.id ? 'Regenerating…' : '↺ Regenerate'}
                     </button>
                   )}
                   {bank.source_type === 'past_paper' && bank.pdf_url && !bank.vision_extracted && (

@@ -17,6 +17,12 @@ except ImportError:
     HAS_PYPDF = False
 
 try:
+    import fitz as _fitz  # PyMuPDF
+    HAS_FITZ = True
+except ImportError:
+    HAS_FITZ = False
+
+try:
     import requests as _requests
     HAS_REQUESTS = True
 except ImportError:
@@ -59,18 +65,99 @@ class SessionSave(BaseModel):
     topic_results: List[Dict]  # [{title, stars}]
 
 
+def _pdf_to_images_b64(content: bytes, dpi: int = 150) -> list:
+    """Render each PDF page to a base64 PNG string using PyMuPDF."""
+    import base64
+    doc = _fitz.open(stream=content, filetype="pdf")
+    zoom = dpi / 72
+    mat = _fitz.Matrix(zoom, zoom)
+    images = [
+        base64.b64encode(page.get_pixmap(matrix=mat).tobytes("png")).decode()
+        for page in doc
+    ]
+    doc.close()
+    return images
+
+
+def _vision_transcribe_pages(images_b64: list, api_key: str) -> str:
+    """Send pages to Claude Haiku in batches of 5 and return transcribed text."""
+    client = anthropic.Anthropic(api_key=api_key)
+    BATCH = 5
+    parts = []
+    for i in range(0, len(images_b64), BATCH):
+        batch = images_b64[i:i + BATCH]
+        start_page = i + 1
+        content = []
+        for j, b64 in enumerate(batch):
+            content.append({"type": "text", "text": f"[Page {start_page + j}]"})
+            content.append({"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": b64}})
+        content.append({
+            "type": "text",
+            "text": (
+                "Transcribe every word of handwritten text visible in these pages exactly as written. "
+                "Preserve structure and layout. Label each page with [Page N]. "
+                "Do not summarise — output the full raw text only."
+            )
+        })
+        try:
+            msg = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=4096,
+                messages=[{"role": "user", "content": content}],
+            )
+            parts.append(msg.content[0].text)
+        except Exception:
+            pass
+    return "\n\n".join(parts)
+
+
 def _fetch_pdf_text(pdf_url: str) -> str:
-    """Download a PDF and extract its text."""
-    if not HAS_PYPDF or not HAS_REQUESTS:
+    """Download a PDF and extract its text. Tries text extraction first, falls back to Claude vision OCR."""
+    if not HAS_REQUESTS:
         return ""
     try:
         r = _requests.get(pdf_url, timeout=30)
         r.raise_for_status()
-        reader = pypdf.PdfReader(io.BytesIO(r.content))
-        pages = [reader.pages[i].extract_text() or "" for i in range(len(reader.pages))]
-        return "\n\n".join(f"[Page {i+1}]\n{t}" for i, t in enumerate(pages))
+        content = r.content
     except Exception:
         return ""
+
+    # Attempt 1: pypdf text extraction
+    if HAS_PYPDF:
+        try:
+            reader = pypdf.PdfReader(io.BytesIO(content))
+            pages = [reader.pages[i].extract_text() or "" for i in range(len(reader.pages))]
+            text = "\n\n".join(f"[Page {i+1}]\n{t}" for i, t in enumerate(pages))
+            if _has_enough_text(text):
+                return text
+        except Exception:
+            pass
+
+    # Attempt 2: PyMuPDF text extraction (handles more encoding variants)
+    if HAS_FITZ:
+        try:
+            doc = _fitz.open(stream=content, filetype="pdf")
+            pages = [doc[i].get_text() or "" for i in range(len(doc))]
+            doc.close()
+            text = "\n\n".join(f"[Page {i+1}]\n{t}" for i, t in enumerate(pages))
+            if _has_enough_text(text):
+                return text
+        except Exception:
+            pass
+
+    # Attempt 3: Claude vision OCR (for handwritten / image-only PDFs)
+    if HAS_FITZ:
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if api_key:
+            try:
+                images = _pdf_to_images_b64(content)
+                text = _vision_transcribe_pages(images, api_key)
+                if _has_enough_text(text):
+                    return text
+            except Exception:
+                pass
+
+    return ""
 
 
 def _has_enough_text(pdf_text: str, min_chars: int = 300) -> bool:
@@ -124,15 +211,20 @@ def start_gauntlet(body: StartRequest):
     supabase = get_supabase_client()
 
     # Return cached topics if the room already has them
+    cached_pdf_text = None
     if body.room_id:
         import time
         for attempt in range(3):
             try:
                 cached = supabase.table("gauntlet_rooms").select("topics, pdf_text").eq("id", body.room_id).execute()
-                if cached.data and cached.data[0].get("topics") and cached.data[0].get("pdf_text"):
+                if cached.data:
                     row = cached.data[0]
-                    return {"topics": row["topics"], "pdf_text": row["pdf_text"]}
-                break  # Query succeeded but no cached data — fall through to extract
+                    if row.get("topics") and row.get("pdf_text"):
+                        return {"topics": row["topics"], "pdf_text": row["pdf_text"]}
+                    # pdf_text cached but topics not yet — use it to skip PDF download
+                    if row.get("pdf_text"):
+                        cached_pdf_text = row["pdf_text"]
+                break
             except Exception:
                 if attempt == 2:
                     raise HTTPException(status_code=503, detail="Could not load session data, please try again.")
@@ -142,7 +234,7 @@ def start_gauntlet(body: StartRequest):
     if not api_key:
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not set")
 
-    pdf_text = _fetch_pdf_text(body.pdf_url)
+    pdf_text = cached_pdf_text or _fetch_pdf_text(body.pdf_url)
     if not pdf_text.strip():
         raise HTTPException(status_code=400, detail="Could not extract text from this PDF. Make sure it is not a scanned image-only PDF.")
     if not _has_enough_text(pdf_text):

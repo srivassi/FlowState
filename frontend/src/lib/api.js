@@ -66,6 +66,8 @@ export const api = {
   chatOnNote: (data) => req('/whiteboard/chat', { method: 'POST', body: JSON.stringify(data) }),
   forkNote: (data) => req('/whiteboard/fork', { method: 'POST', body: JSON.stringify(data) }),
   extractSections: (pdfUrl) => req('/whiteboard/extract-sections', { method: 'POST', body: JSON.stringify({ pdf_url: pdfUrl }) }),
+  getWhiteboardUploadUrl: (data) => req('/whiteboard/upload-url', { method: 'POST', body: JSON.stringify(data) }),
+  generateFlashcardsFromUrl: (data) => req('/flashcards/generate-from-url', { method: 'POST', body: JSON.stringify(data) }),
 
   // ── Question Bank ─────────────────────────────────────────────
   getQuestionTopics: (userId, courseId) => req(`/questions/topics?user_id=${userId}&course_id=${courseId}`),

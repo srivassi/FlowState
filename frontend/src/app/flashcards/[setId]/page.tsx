@@ -125,15 +125,12 @@ export default function StudyPage() {
       ])
       setSet(setData)
       setAllCards(cardsData)
-      setCards(cardsData)
-      // Restore progress from DB statuses
-      const m = new Set<string>(cardsData.filter((c: Flashcard) => c.status === 'mastered').map((c: Flashcard) => c.id))
-      const r = new Set<string>(cardsData.filter((c: Flashcard) => c.status === 'review').map((c: Flashcard) => c.id))
-      setMastered(m)
-      setReview(r)
-      // Resume: start at first card that isn't mastered yet
-      const firstUnmastered = cardsData.findIndex((c: Flashcard) => c.status !== 'mastered')
-      setCurrentIndex(firstUnmastered >= 0 ? firstUnmastered : 0)
+      // Only study cards that aren't already mastered — mastered ones are done
+      const studyDeck = cardsData.filter((c: Flashcard) => c.status !== 'mastered')
+      setCards(studyDeck.length > 0 ? studyDeck : cardsData)
+      setMastered(new Set())
+      setReview(new Set())
+      setCurrentIndex(0)
       setLoading(false)
     })
   }, [setId, router])
@@ -183,30 +180,34 @@ export default function StudyPage() {
   }
 
   const advance = () => {
+    // Check end-of-deck immediately to avoid flashing current card question side
+    if (currentIndex >= cards.length - 1) {
+      setFlipped(false)
+      setDone(true)
+      return
+    }
     setAnimating(true)
-    setFlipped(false)
     setTimeout(() => {
-      if (currentIndex < cards.length - 1) {
-        setCurrentIndex(i => i + 1)
-      } else {
-        setDone(true)
-      }
+      setCurrentIndex(i => i + 1)
+      setFlipped(false)        // flip and advance atomically so you never see the old card's question
       setAnimating(false)
-    }, 200)
+    }, 150)
   }
 
   const restart = (deckOverride?: Flashcard[]) => {
-    const deck = deckOverride ?? allCards
-    setCards(deck)
     setCurrentIndex(0)
     setFlipped(false)
     setDone(false)
-    if (!deckOverride) {
-      // Full restart — clear all statuses in DB
-      allCards.forEach(c => { if (c.status) api.updateFlashcard(c.id, { status: 'new' }).catch(() => {}) })
-      setMastered(new Set())
-      setReview(new Set())
-      setAllCards(prev => prev.map(c => ({ ...c, status: 'new' as const })))
+    setMastered(new Set())
+    setReview(new Set())
+    if (deckOverride) {
+      setCards(deckOverride)
+    } else {
+      // Full restart — reset all statuses in DB and rebuild deck fresh
+      const resetCards = allCards.map(c => ({ ...c, status: 'new' as const }))
+      resetCards.forEach(c => api.updateFlashcard(c.id, { status: 'new' }).catch(() => {}))
+      setAllCards(resetCards)
+      setCards(resetCards)
     }
   }
 

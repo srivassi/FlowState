@@ -262,3 +262,4 @@ def generate_flashcards(
     supabase.table("flashcards").insert(cards_to_insert).execute()
 
     return {"set": new_set, "cards": cards_to_insert, "count": len(cards_to_insert)}
+

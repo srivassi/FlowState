@@ -337,18 +337,30 @@ function WhiteboardInner() {
     setSaving(true)
     setFlashcardGenStatus(null)
     try {
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('user_id', userId)
-      formData.append('course_id', selectedCourse)
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/whiteboard/upload-pdf`, {
-        method: 'POST',
-        body: formData,
-      })
-      if (!res.ok) { const e = await res.json().catch(() => ({})); alert('Upload failed: ' + (e.detail || res.statusText)); return }
-      const { pdf_url, pdf_name, sections } = await res.json()
+      // Get a signed URL from the backend — the file never travels through the backend,
+      // bypassing Vercel's 4.5 MB request body limit for large scanned PDFs.
+      let signedData: { signed_url: string; pdf_url: string }
+      try {
+        signedData = await api.getWhiteboardUploadUrl({ user_id: userId, course_id: selectedCourse, file_name: file.name })
+      } catch (e: unknown) {
+        alert('Upload failed: could not get upload URL — ' + (e instanceof Error ? e.message : String(e)))
+        return
+      }
 
-      // Update the active page with the new PDF (and extracted sections)
+      const uploadRes = await fetch(signedData.signed_url, {
+        method: 'PUT',
+        body: file,
+        headers: { 'Content-Type': 'application/pdf' },
+      })
+      if (!uploadRes.ok) {
+        alert('Upload failed: could not store file (HTTP ' + uploadRes.status + ')')
+        return
+      }
+
+      const pdf_url = signedData.pdf_url
+      const pdf_name = file.name
+      const { sections } = await api.extractSections(pdf_url).catch(() => ({ sections: [] }))
+
       const updatedPages = pages.map(p => p.id === activePageId ? { ...p, pdf_url, pdf_name, sections: sections || [] } : p)
       setPages(updatedPages)
 
@@ -362,17 +374,12 @@ function WhiteboardInner() {
         pdf_name: updatedPages[0]?.pdf_name || null,
       })
 
-      // Auto-generate flashcards
+      // Auto-generate flashcards from the stored URL (no second file upload)
       setFlashcardGenStatus('generating')
       const courseName = courses.find(c => c.id === selectedCourse)?.name || 'Module'
       const setTitle = pdf_name.replace(/\.pdf$/i, '') || courseName
-      const fcForm = new FormData()
-      fcForm.append('file', file)
-      fcForm.append('user_id', userId)
-      fcForm.append('course_id', selectedCourse)
-      fcForm.append('title', setTitle)
-      fetch(`${process.env.NEXT_PUBLIC_API_URL}/flashcards/generate`, { method: 'POST', body: fcForm })
-        .then(r => { if (r.ok) setFlashcardGenStatus('done'); else setFlashcardGenStatus('error') })
+      api.generateFlashcardsFromUrl({ pdf_url, user_id: userId, course_id: selectedCourse, title: setTitle })
+        .then(() => setFlashcardGenStatus('done'))
         .catch(() => setFlashcardGenStatus('error'))
     } finally { setSaving(false) }
   }

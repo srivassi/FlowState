@@ -113,6 +113,28 @@ def upload_pdf(
 
 # ─── Extract sections from an existing PDF URL ───────────────
 
+class UploadUrlRequest(BaseModel):
+    user_id: str
+    course_id: str
+    file_name: str
+
+
+@router.post("/upload-url")
+def get_upload_url(body: UploadUrlRequest):
+    """Return a signed Supabase upload URL so the browser can upload large PDFs directly."""
+    supabase = get_supabase_client()
+    path = f"{body.user_id}/{body.course_id}/{body.file_name}"
+    try:
+        signed = supabase.storage.from_("whiteboards").create_signed_upload_url(path)
+        signed_url = signed.get("signedURL") or signed.get("signed_url") or ""
+        if not signed_url:
+            raise ValueError(f"Unexpected signed URL response: {signed}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not create upload URL: {e}")
+    pdf_url = supabase.storage.from_("whiteboards").get_public_url(path)
+    return {"signed_url": signed_url, "pdf_url": pdf_url, "path": path}
+
+
 class ExtractSectionsRequest(BaseModel):
     pdf_url: str
 

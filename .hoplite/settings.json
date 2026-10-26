@@ -1,0 +1,12 @@
+{
+  "scripts": {
+    "run": {
+      "command": "cd frontend && npm run dev -- --hostname 0.0.0.0"
+    }
+  },
+  "ports": {
+    "preview": 3000,
+    "additional": []
+  },
+  "version": 1
+}

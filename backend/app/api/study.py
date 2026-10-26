@@ -10,6 +10,7 @@ from app.core.supabase import get_supabase_client
 from app.agent.scheduler import (
     generate_schedule, reschedule_remaining, _parse_date,
     generate_schedule_multi_course, course_capacity_report, _calc_pomodoros_per_day,
+    ScheduleCapacityError,
 )
 from pydantic import BaseModel
 from typing import List, Optional
@@ -312,23 +313,31 @@ def reschedule(body: RescheduleRequest):
     disruptions_result = supabase.table("disruptions").select("*").eq("user_id", body.user_id).execute()
     disruptions = disruptions_result.data or []
 
-    updated = reschedule_remaining(
-        tasks=tasks,
-        completed_task_ids=body.completed_task_ids,
-        exam_date=_parse_date(body.exam_date),
-        daily_study_hours=body.daily_study_hours,
-        pomodoro_minutes=body.pomodoro_minutes,
-        disruptions=disruptions,
-    )
+    try:
+        updated = reschedule_remaining(
+            tasks=tasks,
+            completed_task_ids=body.completed_task_ids,
+            exam_date=_parse_date(body.exam_date),
+            daily_study_hours=body.daily_study_hours,
+            pomodoro_minutes=body.pomodoro_minutes,
+            disruptions=disruptions,
+        )
+    except ScheduleCapacityError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     # Write updated scheduled_dates back to Supabase
+    completed_ids = set(body.completed_task_ids)
+    rescheduled_count = 0
     for t in updated:
+        if t.get("id") in completed_ids or t.get("status") in {"done", "completed"}:
+            continue
         supabase.table("tasks").update({
             "scheduled_date": t.get("scheduled_date"),
             "order_index": t.get("order_index", 0),
         }).eq("id", t["id"]).execute()
+        rescheduled_count += 1
 
-    return {"rescheduled_count": len(updated), "tasks": updated}
+    return {"rescheduled_count": rescheduled_count, "tasks": updated}
 
 
 def _load_reschedule_context(user_id: str, sessions_per_day_override=None):
@@ -576,18 +585,21 @@ def full_reschedule(body: FullRescheduleRequest):
     ctx = _apply_directives(directives, ctx)
 
     # ── Per-course deadline-aware scheduling ─────────────────
-    scheduled = generate_schedule_multi_course(
-        tasks_by_course=dict(ctx["tasks_by_course"]),
-        course_map=ctx["course_map"],
-        daily_study_hours=ctx["daily_hours"],
-        pomodoro_minutes=ctx["pomodoro_minutes"],
-        disruptions=ctx["disruptions"],
-        start_date=ctx.get("start_date", ctx["today"]),
-        sessions_per_day=ctx["sessions_per_day"],
-        session_duration_minutes=ctx["session_duration_minutes"],
-        tasks_per_day_override=ctx.get("tasks_per_day_override", {}),
-        interleave_courses=body.interleave_courses,
-    )
+    try:
+        scheduled = generate_schedule_multi_course(
+            tasks_by_course=dict(ctx["tasks_by_course"]),
+            course_map=ctx["course_map"],
+            daily_study_hours=ctx["daily_hours"],
+            pomodoro_minutes=ctx["pomodoro_minutes"],
+            disruptions=ctx["disruptions"],
+            start_date=ctx.get("start_date", ctx["today"]),
+            sessions_per_day=ctx["sessions_per_day"],
+            session_duration_minutes=ctx["session_duration_minutes"],
+            tasks_per_day_override=ctx.get("tasks_per_day_override", {}),
+            interleave_courses=body.interleave_courses,
+        )
+    except ScheduleCapacityError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     for t in scheduled:
         update_payload = {

@@ -3,6 +3,10 @@ from collections import defaultdict
 from typing import List, Dict, Optional
 
 
+class ScheduleCapacityError(ValueError):
+    """Raised when unfinished tasks cannot fit before their deadline."""
+
+
 def _parse_date(d) -> date:
     if isinstance(d, date):
         return d
@@ -78,8 +82,7 @@ def generate_schedule_multi_course(
     ordered by exam urgency (soonest exam first).
 
     interleave_courses=False: each day is dedicated to a single course,
-    rotating through courses round-robin in urgency order so the most urgent
-    course always gets a day before less-urgent courses repeat.
+    scheduling courses in exam-deadline order.
     """
     if start_date is None:
         start_date = date.today()
@@ -96,43 +99,24 @@ def generate_schedule_multi_course(
 
     if not interleave_courses:
         # ── Non-interleave: dedicate each available day to one course ──────
-        # Build a global list of available days (union across all exams)
-        latest_exam = max(
-            (_parse_date(course_map[cid]["exam_date"]) for cid in sorted_courses),
-            default=start_date + timedelta(days=30),
+        latest_buffer = max(
+            (_parse_date(course_map[cid]["exam_date"]) - timedelta(days=1) for cid in sorted_courses),
+            default=start_date,
         )
-        all_available = _available_days(start_date, latest_exam, disrupted_dates)
-        if not all_available:
-            all_available = [start_date]
-
-        # Remaining tasks per course (mutable copies)
+        all_available = _available_days(start_date, latest_buffer, disrupted_dates)
         remaining = {cid: list(tasks_by_course[cid]) for cid in sorted_courses}
         result = []
-        day_idx = 0
-        course_cycle_idx = 0   # which course to serve next (round-robin by urgency rank)
 
         for d in all_available:
-            # Skip courses that are exhausted
-            active_courses = [cid for cid in sorted_courses if remaining[cid]]
+            active_courses = [
+                cid for cid in sorted_courses
+                if remaining[cid]
+                and d < _parse_date(course_map[cid]["exam_date"]) - timedelta(days=1)
+            ]
             if not active_courses:
-                break
+                continue
 
-            # Advance round-robin pointer, skipping exhausted courses
-            while sorted_courses[course_cycle_idx % len(sorted_courses)] not in active_courses:
-                course_cycle_idx += 1
-
-            cid = sorted_courses[course_cycle_idx % len(sorted_courses)]
-            course_cycle_idx += 1
-
-            exam_date = _parse_date(course_map[cid]["exam_date"])
-            exam_buffer = exam_date - timedelta(days=1)
-            if d >= exam_buffer:
-                # Don't schedule this course on or after its exam buffer — try next
-                for alt in active_courses:
-                    alt_exam = _parse_date(course_map[alt]["exam_date"]) - timedelta(days=1)
-                    if d < alt_exam:
-                        cid = alt
-                        break
+            cid = active_courses[0]
 
             ppd = tasks_per_day_override.get(cid, base_ppd) if tasks_per_day_override else base_ppd
             ppd = min(max(ppd, 1), 12)
@@ -146,18 +130,10 @@ def generate_schedule_multi_course(
                 t["order_index"] = order_idx
                 result.append(t)
 
-        # Any tasks that didn't fit — pile onto the last available day before exam
-        for cid in sorted_courses:
-            if not remaining[cid]:
-                continue
-            exam_buffer = _parse_date(course_map[cid]["exam_date"]) - timedelta(days=1)
-            fallback_days = _available_days(start_date, exam_buffer, disrupted_dates)
-            fallback = fallback_days[-1] if fallback_days else start_date
-            for order_idx, t in enumerate(remaining[cid]):
-                t = dict(t)
-                t["scheduled_date"] = fallback.isoformat()
-                t["order_index"] = 1000 + order_idx
-                result.append(t)
+        if any(remaining.values()):
+            raise ScheduleCapacityError(
+                "Some unfinished tasks cannot fit before their exam dates with the available study days."
+            )
 
         return result
 
@@ -172,9 +148,6 @@ def generate_schedule_multi_course(
         exam_date = _parse_date(course_map[cid]["exam_date"])
         exam_buffer = exam_date - timedelta(days=1)
         available = _available_days(start_date, exam_buffer, disrupted_dates)
-
-        if not available:
-            available = [start_date]
 
         # Respect the user's configured tasks/day as a hard cap.
         # tasks_per_day_override (from Claude directives) can raise it for tight courses.
@@ -252,34 +225,22 @@ def reschedule_remaining(
     pomodoro_minutes: int,
     disruptions: List[Dict],
 ) -> List[Dict]:
-    """
-    Redistributes overdue/remaining tasks starting from tomorrow.
-    Completed tasks are untouched.
-    """
+    """Redistribute every unfinished task starting tomorrow; preserve completed tasks."""
     today = date.today()
     completed_ids_set = set(completed_task_ids)
 
-    done_tasks = [t for t in tasks if t["id"] in completed_ids_set or t["status"] == "done"]
-    overdue = [
+    completed_statuses = {"done", "completed"}
+    remaining = [
         t for t in tasks
         if t["id"] not in completed_ids_set
-        and t["status"] != "done"
-        and t.get("scheduled_date")
-        and _parse_date(t["scheduled_date"]) <= today
-    ]
-    future_tasks = [
-        t for t in tasks
-        if t["id"] not in completed_ids_set
-        and t["status"] != "done"
-        and t.get("scheduled_date")
-        and _parse_date(t["scheduled_date"]) > today
+        and t.get("status") not in completed_statuses
     ]
 
-    if not overdue:
-        return tasks
+    if not remaining:
+        return [dict(t) for t in tasks]
 
     rescheduled = generate_schedule(
-        tasks=overdue,
+        tasks=remaining,
         exam_date=exam_date,
         daily_study_hours=daily_study_hours,
         pomodoro_minutes=pomodoro_minutes,
@@ -287,7 +248,8 @@ def reschedule_remaining(
         start_date=today + timedelta(days=1),
     )
 
-    return done_tasks + rescheduled + future_tasks
+    by_id = {task["id"]: task for task in rescheduled}
+    return [by_id.get(task["id"], dict(task)) for task in tasks]
 
 
 # ─── Internal helpers ────────────────────────────────────────
@@ -319,22 +281,20 @@ def _calc_pomodoros_per_day(
 def _pack_tasks(tasks: List[Dict], available_days: List[date], pomodoros_per_day: int) -> List[Dict]:
     """
     Assign scheduled_date + order_index sequentially into available_days.
-    If tasks overflow the available days, continue scheduling day-by-day past
-    the last available day so overflow is visible on the calendar rather than
-    silently piling onto the last pre-exam day.
+    Raises instead of putting overflow tasks beyond the available deadline.
     """
+    capacity = len(available_days) * pomodoros_per_day
+    if tasks and (not available_days or len(tasks) > capacity):
+        raise ScheduleCapacityError(
+            f"Cannot schedule {len(tasks)} unfinished tasks: only {capacity} study slots are available before the deadline."
+        )
+
     scheduled = []
     day_idx = 0
     slot_in_day = 0
-    last_day = available_days[-1] if available_days else date.today()
 
     for task in tasks:
-        if day_idx < len(available_days):
-            current_day = available_days[day_idx]
-        else:
-            # Overflow: continue past the last available day, one calendar day at a time
-            overflow_offset = day_idx - len(available_days) + 1
-            current_day = last_day + timedelta(days=overflow_offset)
+        current_day = available_days[day_idx]
 
         scheduled.append({
             **task,

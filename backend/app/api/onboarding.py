@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from app.core.supabase import get_supabase_client
 from pydantic import BaseModel
 from typing import List, Optional
+from datetime import date
 
 router = APIRouter(prefix="/onboarding")
 
@@ -132,6 +133,30 @@ def get_courses(user_id: str):
     for r in rows:
         r["name"] = r.get("title", "")
     return rows
+
+
+class CourseExamUpdate(BaseModel):
+    user_id: str
+    exam_date: date
+
+
+@router.patch("/courses/{course_id}")
+def update_course_exam(course_id: str, body: CourseExamUpdate):
+    if body.exam_date <= date.today():
+        raise HTTPException(status_code=400, detail="Choose an exam date after today")
+    supabase = get_supabase_client()
+    result = (
+        supabase.table("courses")
+        .update({"exam_date": body.exam_date.isoformat()})
+        .eq("id", course_id)
+        .eq("user_id", body.user_id)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Module not found")
+    row = result.data[0]
+    row["name"] = row.get("title", "")
+    return row
 
 
 @router.delete("/courses/{course_id}")

@@ -7,13 +7,14 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '../../lib/supabase'
 import { api } from '../../lib/api'
+import GauntletExamSettings, { type ExamConfig } from '../../components/GauntletExamSettings'
 
 const NOTION = {
   bg: '#FFFFFF', sidebar: '#FBFBFA', border: '#EDEDED',
   hover: '#EFEFED', text: '#37352F', muted: 'rgba(55,53,47,0.5)',
 }
 
-type Course = { id: string; name: string; color: string }
+type Course = { id: string; name: string; color: string; gauntlet_exam_config?: ExamConfig | null }
 type FlashcardSet = { id: string; title: string; course_id: string }
 type GauntletRoom = {
   id: string; pdf_url: string; pdf_name: string; last_played_at: string | null
@@ -67,6 +68,7 @@ export default function GamesPage() {
   const [loadingRooms, setLoadingRooms] = useState(false)
   const [loadingWb, setLoadingWb] = useState(false)
   const [showNewPdf, setShowNewPdf] = useState(false)
+  const [examSettingsPending, setExamSettingsPending] = useState(false)
 
   // Jeopardy picker state
   const [showJeopardyPicker, setShowJeopardyPicker] = useState(false)
@@ -111,6 +113,7 @@ export default function GamesPage() {
   }, [gauntletCourse, userId])
 
   const launchGauntlet = async (pdfUrl: string, pdfName: string, existingRoomId?: string) => {
+    if (examSettingsPending) return
     let roomId = existingRoomId
     if (!roomId) {
       const room = await api.gauntletUpsertRoom({ user_id: userId, course_id: gauntletCourse, pdf_url: pdfUrl, pdf_name: pdfName })
@@ -179,12 +182,20 @@ export default function GamesPage() {
             </div>
 
             <label className="mb-1 block text-xs font-medium" style={{ color: NOTION.muted }}>Module</label>
-            <select value={gauntletCourse} onChange={e => { setGauntletCourse(e.target.value); setRooms([]); setShowNewPdf(false) }}
+            <select value={gauntletCourse} onChange={e => { setGauntletCourse(e.target.value); setExamSettingsPending(false); setRooms([]); setShowNewPdf(false) }}
               className="mb-5 w-full rounded-lg border px-3 py-2 text-sm focus:outline-none"
               style={{ borderColor: NOTION.border }}>
               <option value="">Select a module…</option>
               {courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
+
+            {gauntletCourse && userId && (
+              <GauntletExamSettings key={gauntletCourse} courseId={gauntletCourse} userId={userId}
+                initialConfig={courses.find(course => course.id === gauntletCourse)?.gauntlet_exam_config}
+                onPendingChange={setExamSettingsPending}
+                onSaved={config => setCourses(current => current.map(course => course.id === gauntletCourse
+                  ? { ...course, gauntlet_exam_config: config } : course))} />
+            )}
 
             {gauntletCourse && (loadingRooms ? (
               <p className="text-sm" style={{ color: NOTION.muted }}>Loading…</p>
@@ -205,8 +216,8 @@ export default function GamesPage() {
                             {' · '}{timeAgo(room.last_played_at)}
                           </div>
                         </div>
-                        <button onClick={() => launchGauntlet(room.pdf_url, room.pdf_name || 'PDF', room.id)}
-                          className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition hover:opacity-90"
+                        <button disabled={examSettingsPending} onClick={() => launchGauntlet(room.pdf_url, room.pdf_name || 'PDF', room.id)}
+                          className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-40"
                           style={{ backgroundColor: '#6366F1' }}>
                           Play →
                         </button>
@@ -226,8 +237,8 @@ export default function GamesPage() {
                     {showNewPdf && (
                       <div className="space-y-2">
                         {whiteboards.filter(p => p.pdf_url && !rooms.find(r => r.pdf_url === p.pdf_url)).map((p: any) => (
-                          <button key={p.id} onClick={() => launchGauntlet(p.pdf_url, p.pdf_name || p.name)}
-                            className="flex w-full items-center gap-3 rounded-lg border px-4 py-3 text-left text-sm transition hover:bg-[#F7F7F5]"
+                          <button key={p.id} disabled={examSettingsPending} onClick={() => launchGauntlet(p.pdf_url, p.pdf_name || p.name)}
+                            className="flex w-full items-center gap-3 rounded-lg border px-4 py-3 text-left text-sm transition hover:bg-[#F7F7F5] disabled:opacity-40"
                             style={{ borderColor: NOTION.border }}>
                             <span>📄</span>
                             <span className="flex-1 truncate font-medium">{p.pdf_name || p.name}</span>
@@ -278,7 +289,7 @@ export default function GamesPage() {
                   <label className="mb-1 block text-xs font-medium" style={{ color: NOTION.muted }}>Set</label>
                   {sets.map(s => (
                     <button key={s.id} onClick={() => launchJeopardy(s.id)}
-                      className="flex w-full items-center gap-3 rounded-lg border px-4 py-3 text-left text-sm transition hover:bg-[#F7F7F5]"
+                      className="flex w-full items-center gap-3 rounded-lg border px-4 py-3 text-left text-sm transition hover:bg-[#F7F7F5] disabled:opacity-40"
                       style={{ borderColor: NOTION.border }}>
                       <span>🃏</span>
                       <span className="flex-1 truncate font-medium">{s.title}</span>

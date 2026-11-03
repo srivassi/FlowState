@@ -10,6 +10,7 @@ from app.core.supabase import get_supabase_client
 from app.agent.scheduler import (
     generate_schedule, reschedule_remaining, _parse_date,
     generate_schedule_multi_course, course_capacity_report, _calc_pomodoros_per_day,
+    ScheduleCapacityError,
 )
 from pydantic import BaseModel
 from typing import List, Optional
@@ -312,23 +313,31 @@ def reschedule(body: RescheduleRequest):
     disruptions_result = supabase.table("disruptions").select("*").eq("user_id", body.user_id).execute()
     disruptions = disruptions_result.data or []
 
-    updated = reschedule_remaining(
-        tasks=tasks,
-        completed_task_ids=body.completed_task_ids,
-        exam_date=_parse_date(body.exam_date),
-        daily_study_hours=body.daily_study_hours,
-        pomodoro_minutes=body.pomodoro_minutes,
-        disruptions=disruptions,
-    )
+    try:
+        updated = reschedule_remaining(
+            tasks=tasks,
+            completed_task_ids=body.completed_task_ids,
+            exam_date=_parse_date(body.exam_date),
+            daily_study_hours=body.daily_study_hours,
+            pomodoro_minutes=body.pomodoro_minutes,
+            disruptions=disruptions,
+        )
+    except ScheduleCapacityError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # Write updated scheduled_dates back to Supabase
+    completed_ids = set(body.completed_task_ids)
+    rescheduled_count = 0
     for t in updated:
+        if t.get("id") in completed_ids or t.get("status") in {"done", "completed"}:
+            continue
         supabase.table("tasks").update({
             "scheduled_date": t.get("scheduled_date"),
             "order_index": t.get("order_index", 0),
         }).eq("id", t["id"]).execute()
+        rescheduled_count += 1
 
-    return {"rescheduled_count": len(updated), "tasks": updated}
+    return {"rescheduled_count": rescheduled_count, "tasks": updated}
 
 
 def _load_reschedule_context(user_id: str, sessions_per_day_override=None):
@@ -349,12 +358,24 @@ def _load_reschedule_context(user_id: str, sessions_per_day_override=None):
 
     priority_order = {"high": 0, "medium": 1, "low": 2}
     tasks_by_course: dict = defaultdict(list)
-    for course in course_map.values():
+    missing_exam_date_courses = []
+    for course in courses:
         tasks = supabase.table("tasks").select("*").eq("course_id", course["id"]).execute().data or []
-        for t in tasks:
-            if t.get("status") not in ("done", "completed", "in_progress"):
-                t["_exam_date"] = course["exam_date"]
-                tasks_by_course[course["id"]].append(t)
+        remaining = [
+            t for t in tasks
+            if t.get("status") not in ("done", "completed", "in_progress")
+        ]
+        if remaining and not course.get("exam_date"):
+            missing_exam_date_courses.append({
+                "course_name": course.get("title", course["id"]),
+                "task_count": len(remaining),
+            })
+            continue
+        if not course.get("exam_date"):
+            continue
+        for t in remaining:
+            t["_exam_date"] = course["exam_date"]
+            tasks_by_course[course["id"]].append(t)
         tasks_by_course[course["id"]].sort(
             key=lambda t: priority_order.get(t.get("priority", "medium"), 1)
         )
@@ -372,6 +393,7 @@ def _load_reschedule_context(user_id: str, sessions_per_day_override=None):
         "session_duration_minutes": session_duration_minutes,
         "course_map": course_map,
         "tasks_by_course": tasks_by_course,
+        "missing_exam_date_courses": missing_exam_date_courses,
         "base_ppd": base_ppd,
         "capacity": capacity,
     }
@@ -438,7 +460,7 @@ Return raw JSON only, no markdown fences."""
 def _apply_directives(directives: dict, ctx: dict):
     """Mutates ctx in-place based on Claude's directives. Returns updated ctx."""
     if directives.get("start_date"):
-        ctx["start_date"] = _parse_date(directives["start_date"])
+        ctx["start_date"] = _validate_start_date_directive(directives, ctx["today"])
     else:
         ctx["start_date"] = ctx["today"]
 
@@ -500,6 +522,25 @@ def _apply_directives(directives: dict, ctx: dict):
     return ctx
 
 
+def _validate_start_date_directive(directives: dict, today: date) -> date:
+    start_date = _parse_date(directives["start_date"])
+    if start_date < today:
+        raise HTTPException(status_code=400, detail="Reschedule start date cannot be in the past.")
+    return start_date
+
+
+def _reject_missing_exam_dates(ctx: dict):
+    missing = ctx.get("missing_exam_date_courses", [])
+    if not missing:
+        return
+    total = sum(course["task_count"] for course in missing)
+    names = ", ".join(course["course_name"] for course in missing)
+    raise HTTPException(
+        status_code=400,
+        detail=f"Cannot reschedule {total} unfinished task(s) without module exam dates: {names}.",
+    )
+
+
 @router.post("/reschedule-preview")
 def reschedule_preview(body: FullRescheduleRequest):
     """
@@ -508,6 +549,7 @@ def reschedule_preview(body: FullRescheduleRequest):
     The frontend shows this to the user before they confirm.
     """
     ctx = _load_reschedule_context(body.user_id, body.sessions_per_day_override)
+    _reject_missing_exam_dates(ctx)
 
     if not any(ctx["tasks_by_course"].values()):
         return {"summary": "No remaining tasks to reschedule.", "directives": {}}
@@ -523,6 +565,8 @@ def reschedule_preview(body: FullRescheduleRequest):
         raw = msg.content[0].text.strip()
         directives = _extract_json(raw)
         if directives:
+            if directives.get("start_date"):
+                _validate_start_date_directive(directives, ctx["today"])
             summary = directives.get("summary", "Schedule will be updated based on your exam deadlines.")
             return {
                 "summary": summary,
@@ -530,6 +574,8 @@ def reschedule_preview(body: FullRescheduleRequest):
                 "overflow_courses": directives.get("overflow_courses", []),
                 "merge_suggestions": directives.get("merge_suggestions", []),
             }
+    except HTTPException:
+        raise
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Preview error: {e}")
@@ -549,6 +595,7 @@ def full_reschedule(body: FullRescheduleRequest):
     today = date.today()
 
     ctx = _load_reschedule_context(body.user_id, body.sessions_per_day_override)
+    _reject_missing_exam_dates(ctx)
     supabase = ctx["supabase"]
 
     if not any(ctx["tasks_by_course"].values()):
@@ -576,19 +623,23 @@ def full_reschedule(body: FullRescheduleRequest):
     ctx = _apply_directives(directives, ctx)
 
     # ── Per-course deadline-aware scheduling ─────────────────
-    scheduled = generate_schedule_multi_course(
-        tasks_by_course=dict(ctx["tasks_by_course"]),
-        course_map=ctx["course_map"],
-        daily_study_hours=ctx["daily_hours"],
-        pomodoro_minutes=ctx["pomodoro_minutes"],
-        disruptions=ctx["disruptions"],
-        start_date=ctx.get("start_date", ctx["today"]),
-        sessions_per_day=ctx["sessions_per_day"],
-        session_duration_minutes=ctx["session_duration_minutes"],
-        tasks_per_day_override=ctx.get("tasks_per_day_override", {}),
-        interleave_courses=body.interleave_courses,
-    )
+    try:
+        scheduled = generate_schedule_multi_course(
+            tasks_by_course=dict(ctx["tasks_by_course"]),
+            course_map=ctx["course_map"],
+            daily_study_hours=ctx["daily_hours"],
+            pomodoro_minutes=ctx["pomodoro_minutes"],
+            disruptions=ctx["disruptions"],
+            start_date=ctx.get("start_date", ctx["today"]),
+            sessions_per_day=ctx["sessions_per_day"],
+            session_duration_minutes=ctx["session_duration_minutes"],
+            tasks_per_day_override=ctx.get("tasks_per_day_override", {}),
+            interleave_courses=body.interleave_courses,
+        )
+    except ScheduleCapacityError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    merged_count = 0
     for t in scheduled:
         update_payload = {
             "scheduled_date": t.get("scheduled_date"),
@@ -602,6 +653,7 @@ def full_reschedule(body: FullRescheduleRequest):
             # Delete the tasks that were merged away
             for dead_id in t["_merged_from"]:
                 supabase.table("tasks").delete().eq("id", dead_id).execute()
+                merged_count += 1
         supabase.table("tasks").update(update_payload).eq("id", t["id"]).execute()
 
-    return {"updated": len(scheduled)}
+    return {"updated": len(scheduled), "scheduled_count": len(scheduled), "merged_task_count": merged_count}

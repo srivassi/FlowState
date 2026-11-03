@@ -106,6 +106,11 @@ export default function Dashboard() {
   const [profile, setProfile] = useState<any>(null)
   const [stats, setStats] = useState<Stats | null>(null)
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null)
+  const [editingExam, setEditingExam] = useState(false)
+  const [examDate, setExamDate] = useState('')
+  const [savingExam, setSavingExam] = useState(false)
+  const [examMessage, setExamMessage] = useState('')
+  const [examError, setExamError] = useState('')
   const [courseTasks, setCourseTasks] = useState<Task[]>([])
   const [activeTask, setActiveTask] = useState<Task | null>(null)
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
@@ -194,10 +199,32 @@ export default function Dashboard() {
   }
 
   const loadCourse = async (course: Course) => {
+    setEditingExam(false)
+    setExamMessage('')
+    setExamError('')
     setSelectedCourse(course)
     setView('today')
     const tasks = await api.getTasks(course.id).catch(() => [])
     setCourseTasks(tasks)
+  }
+
+  const saveExamDate = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!selectedCourse || !userId) return
+    setSavingExam(true)
+    setExamError('')
+    setExamMessage('')
+    try {
+      const updated = await api.updateCourseExam(selectedCourse.id, { user_id: userId, exam_date: examDate })
+      setCourses(prev => prev.map(course => course.id === updated.id ? updated : course))
+      setSelectedCourse(updated)
+      setEditingExam(false)
+      setPreviewSummary('')
+      setPreviewDirectives(null)
+      setExamMessage('Exam date saved. Use Reschedule tasks to move unfinished tasks to the new deadline; completed tasks stay unchanged.')
+    } catch (error) {
+      setExamError(error instanceof Error ? error.message : 'Could not save exam date')
+    } finally { setSavingExam(false) }
   }
 
   const deleteCourse = async (courseId: string) => {
@@ -528,7 +555,7 @@ export default function Dashboard() {
               )}
               {selectedCourse?.exam_date && (
                 <div className="mt-1 text-sm text-white/75">
-                  Exam {new Date(selectedCourse.exam_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })}
+                  Exam {new Date(`${selectedCourse.exam_date}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}
                 </div>
               )}
             </div>
@@ -687,6 +714,30 @@ export default function Dashboard() {
           {/* ── Module view ── */}
           {selectedCourse && (
             <>
+              <div className="mb-6 rounded border p-4" style={{ borderColor: NOTION.border, color: NOTION.text }}>
+                {editingExam ? (
+                  <form onSubmit={saveExamDate} className="flex flex-wrap items-end gap-3">
+                    <label className="text-sm">
+                      Exam date
+                      <input type="date" required value={examDate} onChange={event => setExamDate(event.target.value)}
+                        disabled={savingExam} className="ml-3 rounded border px-2 py-1.5" />
+                    </label>
+                    <button type="submit" disabled={savingExam} className="rounded border px-3 py-1.5 text-sm disabled:opacity-50">
+                      {savingExam ? 'Saving…' : 'Save exam date'}
+                    </button>
+                    <button type="button" disabled={savingExam} onClick={() => { setEditingExam(false); setExamError('') }} className="px-3 py-1.5 text-sm">Cancel</button>
+                  </form>
+                ) : (
+                  <div className="flex flex-wrap gap-3">
+                    <NotionBtn onClick={() => { setExamDate(selectedCourse.exam_date || ''); setEditingExam(true); setExamMessage(''); setExamError('') }}>
+                      {selectedCourse.exam_date ? 'Edit exam date' : 'Set exam date'}
+                    </NotionBtn>
+                    <NotionBtn onClick={() => { setPreviewSummary(''); setPreviewDirectives(null); setRescheduleError(''); setShowRescheduleModal(true) }}>Reschedule tasks</NotionBtn>
+                  </div>
+                )}
+                {examError && <p role="alert" className="mt-3 text-sm text-red-700">{examError}</p>}
+                {examMessage && <p role="status" className="mt-3 text-sm">{examMessage}</p>}
+              </div>
               {/* View toggle */}
               <div className="mb-6 flex gap-2">
                 <NotionBtn onClick={() => setView('today')}
@@ -1126,6 +1177,7 @@ export default function Dashboard() {
                         })
                         const plan = await api.getTodayPlan(userId).catch(() => ({ tasks: [] }))
                         setTodayTasks(plan.tasks || [])
+                        if (selectedCourse) setCourseTasks(await api.getTasks(selectedCourse.id))
                         setShowRescheduleModal(false)
                         setRescheduleFeedback('')
                         setRescheduleSessionsOverride('')

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from app.agent.syllabus_parser import SyllabusParser
-from app.agent.scheduler import generate_schedule
+from app.agent.scheduler import generate_schedule, ScheduleCapacityError
 from app.agent.schemas import AgentInput
 from app.core.supabase import get_supabase_client
 import os
@@ -87,6 +87,8 @@ def generate_plan(input: AgentInput):
             "total_study_time": sum(t["estimated_minutes"] for t in scheduled),
             "status": "success"
         }
+    except ScheduleCapacityError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except HTTPException:
         raise
     except Exception as e:

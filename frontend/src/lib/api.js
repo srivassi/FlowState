@@ -21,6 +21,7 @@ export const api = {
   // ── Courses ──────────────────────────────────────────
   createCourse: (data) => req('/onboarding/courses', { method: 'POST', body: JSON.stringify(data) }),
   getCourses: (userId) => req(`/onboarding/courses/${userId}`),
+  updateCourseExam: (courseId, data) => req(`/onboarding/courses/${courseId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteCourse: (courseId) => req(`/onboarding/courses/${courseId}`, { method: 'DELETE' }),
 
   // ── Disruptions ──────────────────────────────────────

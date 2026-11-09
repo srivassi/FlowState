@@ -105,6 +105,10 @@ study-planner-agent/
 
 Before deploying module exam context, apply `backend/migrations/20261103_gauntlet_exam_config.sql` to the target Supabase database, then deploy the backend and frontend. See [migration and rollback instructions](backend/migrations/README.md).
 
+## GoF automatic progress
+
+Rooms automatically checkpoint conversations, topic position and stars and resume on reopening without another initial AI turn. Apply `backend/migrations/20261109_gauntlet_progress.sql` before deploying autosave; the earlier exam-context SQL alone does not add this column. See [migration and rollback instructions](backend/migrations/README.md).
+
 ## AI cost controls
 
 Claude requests now use cost-aware model routing, with economy mode by default. Goblet of Fire uses Haiku for routine turns, Sonnet for deeper/reasoning-heavy turns, a maximum-two-call validated cascade, and a reusable cached notes prefix. Opus escalation requires explicit backend opt-in. See [routing modes, token logs and rollout](docs/model-routing.md) for optional backend settings and caching limitations.

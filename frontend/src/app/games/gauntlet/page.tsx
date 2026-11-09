@@ -14,7 +14,7 @@ const N = {
   indigo: '#6366F1', indigoBg: '#EEF2FF',
 }
 
-type Topic = { id: string; title: string; summary: string; key_points?: string[] | null }
+type Topic = { id: string; title: string; summary: string; key_points?: string[] }
 type Message = { role: 'user' | 'assistant'; content: string }
 type TopicState = { topic: Topic; messages: Message[]; stars: number | null }
 type Phase = 'loading' | 'active' | 'finished'
@@ -66,27 +66,6 @@ function TopicRail({ topicStates, currentIdx, onSelect }: {
   )
 }
 
-type Progress = {
-  version: 1
-  session_id: string
-  phase: 'active' | 'finished'
-  current_topic_index: number
-  topic_states: TopicState[]
-  pending_next: { next_idx: number; stars: number } | null
-}
-type LocalProgress = { progress: Progress; pending: boolean }
-const progressKey = (userId: string, roomId: string) => `gof-progress:${userId}:${roomId}`
-
-function readLocalProgress(key: string): LocalProgress | null {
-  try { return JSON.parse(localStorage.getItem(key) || 'null') } catch { return null }
-}
-
-function validProgress(progress: Progress | null, topics: Topic[]): progress is Progress {
-  return !!progress && progress.version === 1 && progress.topic_states.length === topics.length
-    && progress.current_topic_index >= 0 && progress.current_topic_index < topics.length
-    && progress.topic_states.every((state, index) => state.topic.id === topics[index].id && Array.isArray(state.messages))
-}
-
 type PendingNext = { nextIdx: number; statesWithStars: TopicState[]; stars: number }
 
 export default function GauntletPage() {
@@ -104,69 +83,11 @@ export default function GauntletPage() {
   const [sessionSaved, setSessionSaved] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const startedRef = useRef(false)
-  const [saveStatus, setSaveStatus] = useState('')
-  const [progressReady, setProgressReady] = useState(false)
-  const sessionIdRef = useRef('')
-  const latestSnapshotRef = useRef('')
-  const saveQueueRef = useRef<Promise<unknown>>(Promise.resolve())
-  const latestSaveRef = useRef<(() => void) | null>(null)
   const currentTS = topicStates[currentIdx]
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [topicStates, currentIdx])
-
-  useEffect(() => {
-    if (!progressReady || sending || phase === 'loading' || !roomId || !topicStates.some(state => state.messages.length)) return
-    const context = JSON.parse(sessionStorage.getItem('gauntletPdf') || '{}')
-    if (!context.userId) return
-    const key = progressKey(context.userId, roomId)
-    const progress: Progress = {
-      version: 1, session_id: sessionIdRef.current, phase,
-      current_topic_index: currentIdx, topic_states: topicStates,
-      pending_next: pendingNext ? { next_idx: pendingNext.nextIdx, stars: pendingNext.stars } : null,
-    }
-    const serialized = JSON.stringify(progress)
-    latestSnapshotRef.current = serialized
-    let browserBackup = false
-    try {
-      localStorage.setItem(key, JSON.stringify({ progress, pending: true }))
-      browserBackup = true
-      setSaveStatus('Saving progress…')
-    } catch { setSaveStatus('Browser backup unavailable; saving to server…') }
-    const save = () => {
-      saveQueueRef.current = saveQueueRef.current.catch(() => {}).then(async () => {
-        try {
-          await api.gauntletSaveProgress(roomId, { user_id: context.userId, progress })
-          if (latestSnapshotRef.current === serialized) {
-            try { localStorage.setItem(key, JSON.stringify({ progress, pending: false })) } catch {}
-            setSaveStatus('Progress saved')
-          }
-        } catch {
-          if (latestSnapshotRef.current === serialized) setSaveStatus(browserBackup
-            ? 'Not synced — browser backup kept. Retry save when online.'
-            : 'Not synced — no browser backup available. Please retry save before leaving.')
-        }
-      })
-    }
-    latestSaveRef.current = save
-    const timer = setTimeout(save, 400)
-    return () => clearTimeout(timer)
-  }, [progressReady, sending, phase, roomId, topicStates, currentIdx, pendingNext])
-
-  useEffect(() => {
-    const flush = () => latestSaveRef.current?.()
-    const hidden = () => { if (document.visibilityState === 'hidden') flush() }
-    window.addEventListener('pagehide', flush)
-    window.addEventListener('online', flush)
-    document.addEventListener('visibilitychange', hidden)
-    return () => {
-      flush()
-      window.removeEventListener('pagehide', flush)
-      window.removeEventListener('online', flush)
-      document.removeEventListener('visibilitychange', hidden)
-    }
-  }, [])
 
   // Save session when finished
   useEffect(() => {
@@ -191,44 +112,14 @@ export default function GauntletPage() {
     startedRef.current = true
     const raw = sessionStorage.getItem('gauntletPdf')
     if (!raw) { router.replace('/games'); return }
-    const { pdfUrl, pdfName: name, roomId: rid, userId } = JSON.parse(raw)
+    const { pdfUrl, pdfName: name, roomId: rid } = JSON.parse(raw)
     setPdfName(name || 'PDF')
     if (rid) setRoomId(rid)
     setLoadingMsg(rid ? 'Loading session…' : 'Reading your PDF…')
     if (!rid) setTimeout(() => setLoadingMsg('Extracting topics with Claude…'), 1400)
     api.gauntletStart(pdfUrl, rid)
-      .then(async ({ topics, pdf_text }: { topics: Topic[]; pdf_text: string }) => {
+      .then(({ topics, pdf_text }: { topics: Topic[]; pdf_text: string }) => {
         setPdfText(pdf_text)
-        if (rid && userId) {
-          const local = readLocalProgress(progressKey(userId, rid))
-          let progress = local?.pending ? local.progress : null
-          if (!progress) {
-            try { progress = (await api.gauntletGetProgress(rid, userId)).progress }
-            catch {
-              progress = local?.progress || null
-              if (!progress) throw new Error('Could not load saved progress. Please retry so existing progress is not overwritten.')
-            }
-          }
-          if (validProgress(progress, topics)) {
-            sessionIdRef.current = progress.session_id
-            setTopicStates(progress.topic_states)
-            setCurrentIdx(progress.current_topic_index)
-            setPendingNext(progress.pending_next ? {
-              nextIdx: progress.pending_next.next_idx, stars: progress.pending_next.stars,
-              statesWithStars: progress.topic_states,
-            } : null)
-            setSessionSaved(progress.phase === 'finished')
-            setPhase(progress.phase)
-            setProgressReady(true)
-            if (progress.phase === 'active' && !progress.pending_next
-              && !progress.topic_states[progress.current_topic_index].messages.length) {
-              return sendTurn('', progress.topic_states, progress.current_topic_index, pdf_text, topics)
-            }
-            return
-          }
-        }
-        sessionIdRef.current = crypto.randomUUID()
-        setProgressReady(true)
         const states: TopicState[] = topics.map(t => ({ topic: t, messages: [], stars: null }))
         setTopicStates(states)
         return sendTurn('', states, 0, pdf_text, topics)
@@ -311,7 +202,6 @@ const handleContinue = () => {
   }
 
   const handleEndSession = () => {
-    if (sending) return
     if (!confirm('End session? Your progress so far will be saved.')) return
     const finished = topicStates.map(s => s.stars !== null ? s : { ...s, stars: 0 })
     setTopicStates(finished)
@@ -380,8 +270,6 @@ const handleContinue = () => {
             ))}
           </div>
 
-          <p role="status" className="mb-3 text-xs" style={{ color: N.muted }}>{saveStatus}</p>
-          {saveStatus.startsWith('Not synced') && <button className="mb-3 text-xs underline" onClick={() => latestSaveRef.current?.()}>Retry save</button>}
           <div className="flex gap-3">
             <Link href="/games"
               className="rounded-lg px-5 py-2.5 text-sm font-semibold text-white transition hover:opacity-90"
@@ -389,9 +277,6 @@ const handleContinue = () => {
               ← Back to Games
             </Link>
             <button onClick={() => {
-              latestSaveRef.current = null
-              sessionIdRef.current = crypto.randomUUID()
-              setPendingNext(null)
               setTopicStates(prev => prev.map(ts => ({ ...ts, messages: [], stars: null })))
               setCurrentIdx(0); setPhase('loading'); setLoadingMsg('Restarting…')
               const raw = sessionStorage.getItem('gauntletPdf')
@@ -433,15 +318,13 @@ const handleContinue = () => {
         <div className="min-w-0 flex-1 text-center">
           <div className="text-sm font-semibold" style={{ color: N.text }}>🔥 Goblet of Fire</div>
           <div className="truncate text-xs" style={{ color: N.muted }}>{pdfName}</div>
-          <div role="status" className="text-xs" style={{ color: N.muted }}>{saveStatus}</div>
-          {saveStatus.startsWith('Not synced') && <button className="text-xs underline" onClick={() => latestSaveRef.current?.()}>Retry save</button>}
         </div>
         <div className="shrink-0 flex items-center gap-3">
           <div className="text-right">
             <div className="text-sm font-bold" style={{ color: N.indigo }}>{totalStars} ⭐</div>
             <div className="text-xs" style={{ color: N.muted }}>{pct}%</div>
           </div>
-          <button disabled={sending} onClick={handleEndSession}
+          <button onClick={handleEndSession}
             className="rounded-lg px-3 py-1.5 text-xs font-medium transition hover:bg-[#EFEFED]"
             style={{ border: `1px solid ${N.border}`, color: N.muted }}>
             End

@@ -100,9 +100,6 @@ study-planner-agent/
 
 ---
 
-## GoF automatic progress
-
-Rooms automatically checkpoint conversations, topic position and stars and resume on reopening without another initial AI turn. Apply `backend/migrations/20261109_gauntlet_progress.sql` before deploying autosave. See [migration and rollback instructions](backend/migrations/README.md).
 
 ## AI cost controls
 

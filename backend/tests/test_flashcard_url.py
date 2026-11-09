@@ -94,7 +94,7 @@ class FlashcardUrlTests(unittest.TestCase):
         db.table.assert_any_call("courses")
         tables["courses"].select.return_value.eq.assert_called_once_with("id", "course-1")
         tables["courses"].select.return_value.eq.return_value.eq.assert_called_once_with("user_id", "user-1")
-        anthropic_client.assert_called_once_with(api_key="test-key")
+        anthropic_client.assert_called_once_with(api_key="test-key", max_retries=0)
         self.assertEqual(
             response_body.messages.create.call_args.kwargs["model"], "claude-haiku-4-5-20251001"
         )

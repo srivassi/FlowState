@@ -1,6 +1,7 @@
 import os
 import unittest
 from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
 
 from pydantic import ValidationError
 from fastapi import HTTPException
@@ -114,7 +115,7 @@ class GauntletExamConfigTests(unittest.TestCase):
                 patch("app.api.tutor.get_supabase_client") as supabase:
             result = gauntlet_chat(self._chat_request())
         supabase.assert_not_called()
-        system = client.messages.create.call_args.kwargs["system"]
+        system = client.messages.create.call_args.kwargs["system"][0]["text"]
         self.assertIn("You are a Socratic tutor", system)
         self.assertNotIn("MODULE EXAM PREFERENCES", system)
         self.assertEqual(result["reply"], "What do you think?")
@@ -136,12 +137,33 @@ class GauntletExamConfigTests(unittest.TestCase):
 
         self.assertEqual(supabase.table.call_count, 3)
         self.assertEqual(first["reply"], "Explain how that works.")
-        self.assertIn("problem-solving", client.messages.create.call_args_list[0].kwargs["system"])
-        self.assertIn("problem-solving", client.messages.create.call_args_list[1].kwargs["system"])
-        self.assertIn("problem-solving", client.messages.create.call_args_list[2].kwargs["system"])
+        self.assertIn("problem-solving", client.messages.create.call_args_list[0].kwargs["system"][0]["text"])
+        self.assertIn("problem-solving", client.messages.create.call_args_list[1].kwargs["system"][0]["text"])
+        self.assertIn("problem-solving", client.messages.create.call_args_list[2].kwargs["system"][0]["text"])
         self.assertEqual(deeper["messages"][-2]["content"].startswith("[The student chose to go deeper"), True)
         self.assertEqual(subsequent["messages"][-2]["content"], "It changes the rate.")
-        self.assertIn("30 minutes", client.messages.create.call_args_list[2].kwargs["system"])
+        self.assertIn("30 minutes", client.messages.create.call_args_list[2].kwargs["system"][0]["text"])
+
+    def test_exam_context_survives_cascade_and_topic_changes_in_cache_prefix(self):
+        config = {"question_types": ["essay"], "duration_minutes": 90, "open_book": False, "guidance": "Compare mechanisms using examples."}
+        client = MagicMock()
+        response = lambda text: SimpleNamespace(content=[SimpleNamespace(text=text)], stop_reason="end_turn")
+        client.messages.create.side_effect = [response('{"action":"escalate"}'), response('Explain the mechanism.'), response('Compare these ideas.')]
+        topics = [{"title": "Cells"}, {"title": "Membranes"}]
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key", "AI_ROUTING_MODE": "economy"}, clear=True), patch(
+            "app.api.tutor.anthropic.Anthropic", return_value=client
+        ), patch("app.api.tutor._load_exam_config", return_value=config) as load:
+            first = gauntlet_chat(self._chat_request(course_id="module", user_id="student", topics=topics, user_message="__start__"))
+            gauntlet_chat(self._chat_request(course_id="module", user_id="student", topics=topics, current_topic_index=1))
+        self.assertEqual(first["reply"], "Explain the mechanism.")
+        self.assertEqual(load.call_count, 2)
+        calls = [call.kwargs for call in client.messages.create.call_args_list]
+        self.assertEqual([call["model"] for call in calls], ["claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"])
+        self.assertEqual(calls[0]["system"], calls[1]["system"])
+        self.assertEqual(calls[0]["system"][0], calls[2]["system"][0])
+        self.assertIn(config["guidance"], calls[1]["system"][0]["text"])
+        self.assertIn("closed-book", calls[1]["system"][0]["text"])
+        self.assertIn("CURRENT TOPIC (2 of 2)", calls[2]["system"][1]["text"])
 
     def test_course_chat_requires_user_id(self):
         with patch("app.api.tutor.get_supabase_client") as supabase:

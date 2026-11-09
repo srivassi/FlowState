@@ -9,6 +9,7 @@ import io
 import json
 import re
 from app.core.supabase import get_supabase_client
+from app.core.model_router import QualityGateError, create_message, create_validated_message
 
 try:
     import pypdf
@@ -158,7 +159,7 @@ def _pdf_to_images_b64(content: bytes, dpi: int = 150) -> list:
 
 def _vision_transcribe_pages(images_b64: list, api_key: str) -> str:
     """Send pages to Claude Haiku in batches of 5 and return transcribed text."""
-    client = anthropic.Anthropic(api_key=api_key)
+    client = anthropic.Anthropic(api_key=api_key, max_retries=0)
     BATCH = 5
     parts = []
     for i in range(0, len(images_b64), BATCH):
@@ -177,8 +178,8 @@ def _vision_transcribe_pages(images_b64: list, api_key: str) -> str:
             )
         })
         try:
-            msg = client.messages.create(
-                model="claude-haiku-4-5-20251001",
+            msg = create_message(
+                client, "ocr",
                 max_tokens=4096,
                 messages=[{"role": "user", "content": content}],
             )
@@ -318,7 +319,7 @@ def start_gauntlet(body: StartRequest):
     if len(pdf_text) > MAX_GOF_TEXT_CHARS:
         raise HTTPException(status_code=413, detail="This PDF exceeds the supported study-text length. Split it into chapters so no material is silently omitted.")
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = anthropic.Anthropic(api_key=api_key, max_retries=0)
 
     prompt = f"""You are analysing a lecture PDF to create a Gauntlet study session.
 
@@ -342,8 +343,8 @@ Return ONLY a valid JSON object with this exact structure, no other text:
 Aim for 4-8 topics. If the PDF is short, fewer is fine. Keep each summary under 50 words and include at most 3 short key points per topic. Always return the JSON structure above, with no commentary."""
 
     try:
-        msg = client.messages.create(
-            model="claude-sonnet-4-6",
+        msg = create_message(
+            client, "tutor_topics",
             max_tokens=4000,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -464,6 +465,54 @@ def update_gauntlet_exam_config(course_id: str, body: ExamConfigUpdate):
         raise HTTPException(status_code=404, detail="Module not found")
     return config
 
+
+def _needs_reasoning(user_message: str, topic: dict) -> bool:
+    if user_message == "__go_deeper__" or len(user_message) >= 1200:
+        return True
+    context = f"{topic.get('title', '')} {topic.get('summary', '')} {user_message}"
+    return bool(re.search(
+        r"\b(proof|prove|derive|derivation|integral|differential|algorithm|complexity|"
+        r"debug|counterexample|critique|evaluate|essay)\b|[∫∑√]",
+        context, re.IGNORECASE,
+    ))
+
+
+def _checked_tutor_reply(response, body: ChatRequest):
+    if getattr(response, "stop_reason", None) in {"max_tokens", "refusal", "tool_use"}:
+        raise ValueError("Incomplete tutor response")
+    blocks = getattr(response, "content", [])
+    if not blocks or not isinstance(getattr(blocks[0], "text", None), str):
+        raise ValueError("Missing tutor text")
+    raw = blocks[0].text.strip()
+    if not raw:
+        raise ValueError("Empty tutor response")
+    action_match = re.search(r'\{\s*"action"', raw)
+    if not action_match:
+        return raw, None, None
+    explanation = raw[:action_match.start()].strip()
+    directive = json.loads(raw[action_match.start():])
+    action = directive.get("action")
+    stars = directive.get("stars")
+    if (
+        not explanation
+        or action not in {"next_topic", "finish"}
+        or type(stars) is not int
+        or not 1 <= stars <= 3
+        or body.user_message == "__start__"
+        or (action == "finish") != (body.current_topic_index == len(body.topics) - 1)
+    ):
+        raise ValueError("Invalid tutor progression")
+    return explanation, action, stars
+
+
+def _passes_tutor_gate(response, body: ChatRequest) -> bool:
+    try:
+        _checked_tutor_reply(response, body)
+        return True
+    except (ValueError, TypeError, AttributeError):
+        return False
+
+
 @router.post("/chat")
 def gauntlet_chat(body: ChatRequest):
     exam_config = None
@@ -476,10 +525,11 @@ def gauntlet_chat(body: ChatRequest):
     if not api_key:
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not set")
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = anthropic.Anthropic(api_key=api_key, max_retries=0)
 
-    topic = body.topics[body.current_topic_index] if body.current_topic_index < len(body.topics) else None
-    is_last_topic = body.current_topic_index >= len(body.topics) - 1
+    if not 0 <= body.current_topic_index < len(body.topics):
+        raise HTTPException(status_code=400, detail="Choose a valid topic")
+    topic = body.topics[body.current_topic_index]
 
     system = f"""You are a Socratic tutor running a "Gauntlet" study session. Your role is to guide the student to understanding through conversation — never just quiz them.
 
@@ -488,9 +538,6 @@ FULL PDF CONTENT:
 
 ALL TOPICS IN THIS SESSION:
 {json.dumps(body.topics, indent=2)}
-
-CURRENT TOPIC ({body.current_topic_index + 1} of {len(body.topics)}):
-{json.dumps(topic, indent=2) if topic else "Session complete"}
 
 HOW TO TEACH:
 - If this is the first message on a topic, give a 1-2 sentence framing of why this topic matters, then ask ONE open question to get them thinking. Do NOT list facts or lecture.
@@ -517,7 +564,9 @@ If this is the last topic and they've finished it, use:
 
 Otherwise respond normally with no JSON.
 
-IMPORTANT: Only include the JSON line when genuinely moving on. Never include it mid-discussion."""
+IMPORTANT: Only include the JSON line when genuinely moving on. Never include it mid-discussion.
+Never award stars on the initial __start__ turn before the student has answered. Use finish only on the last topic, and next_topic only on earlier topics.
+If you cannot give a reliable response grounded in the notes because the reasoning exceeds your capability, output exactly {{"action": "escalate"}} instead of guessing. Do not use this for an incorrect student answer: use a bridging question instead. This is an internal routing signal, not a message to the student."""
 
     if exam_config is not None:
         system += _exam_config_prompt(exam_config)
@@ -532,26 +581,29 @@ IMPORTANT: Only include the JSON line when genuinely moving on. Never include it
         )
 
     messages = [*body.messages, {"role": "user", "content": user_msg}]
+    stable_block = {"type": "text", "text": system}
+    if os.getenv("AI_PROMPT_CACHING", "true").lower() == "true":
+        stable_block["cache_control"] = {"type": "ephemeral"}
+    system_blocks = [stable_block, {
+        "type": "text",
+        "text": f"CURRENT TOPIC ({body.current_topic_index + 1} of {len(body.topics)}):\n{json.dumps(topic, indent=2)}",
+    }]
 
-    response = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=1024,
-        system=system,
-        messages=messages,
-    )
+    try:
+        response = create_validated_message(
+            client, "tutor_chat", complex=_needs_reasoning(body.user_message, topic),
+            validator=lambda candidate: _passes_tutor_gate(candidate, body),
+            max_tokens=1024,
+            system=system_blocks,
+            messages=messages,
+        )
+    except QualityGateError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="The tutor could not produce a valid response within the model-attempt limit. Your progress has not advanced.",
+        ) from exc
 
-    raw_reply = response.content[0].text
-
-    # Parse out any action directive
-    action = None
-    stars = None
-    clean_reply = raw_reply
-
-    action_match = re.search(r'\{"action":\s*"(next_topic|finish)",\s*"stars":\s*(\d)\}', raw_reply)
-    if action_match:
-        action = action_match.group(1)
-        stars = int(action_match.group(2))
-        clean_reply = raw_reply[:action_match.start()].strip()
+    clean_reply, action, stars = _checked_tutor_reply(response, body)
 
     updated_messages = [
         *body.messages,

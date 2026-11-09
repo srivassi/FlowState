@@ -85,7 +85,7 @@ class TutorTopicExtractionTests(unittest.TestCase):
             ai.messages.create.return_value = SimpleNamespace(content=[SimpleNamespace(text='What happens next?')])
             chat = client.post('/tutor/chat', json={'pdf_text':notes, 'topics':response.json()['topics'], 'current_topic_index':0, 'messages':[], 'user_message':'__start__'})
             self.assertEqual(chat.status_code, 200)
-            self.assertIn('FINAL CHAPTER MARKER', ai.messages.create.call_args.kwargs['system'])
+            self.assertIn('FINAL CHAPTER MARKER', ai.messages.create.call_args.kwargs['system'][0]['text'])
         self.assertEqual(ai.messages.create.call_count, 2)
 
     def test_oversize_pdf_rejected_before_paid_topic_request(self):
@@ -105,7 +105,7 @@ class TutorTopicExtractionTests(unittest.TestCase):
         self.assertEqual(response.json()['topics'][0]['title'], 'Cells')
         db.table.return_value.update.assert_called_once()
         ai.messages.create.assert_called_once()
-        self.assertEqual(ai.messages.create.call_args.kwargs['model'], 'claude-sonnet-4-6')
+        self.assertEqual(ai.messages.create.call_args.kwargs['model'], 'claude-haiku-4-5-20251001')
         self.assertEqual(ai.messages.create.call_args.kwargs['max_tokens'], 4000)
 
     def test_truncated_reply_is_not_cached_or_retried(self):

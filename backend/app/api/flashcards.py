@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from app.core.model_router import create_message
 from app.core.supabase import get_supabase_client
 from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional
@@ -372,7 +373,7 @@ def _generate_flashcards_from_pdf(
     pdf_text = pdf_text[:100000]
 
     # Generate flashcards with Claude
-    client = anthropic.Anthropic(api_key=api_key)
+    client = anthropic.Anthropic(api_key=api_key, max_retries=0)
 
     instruction_block = (
         f"\nSTUDENT INSTRUCTIONS: {instructions.strip()}\nFollow these instructions carefully when deciding what to include and how to phrase each card.\n"
@@ -388,8 +389,8 @@ def _generate_flashcards_from_pdf(
         f"Course material:\n{pdf_text}"
     )
 
-    response = client.messages.create(
-        model="claude-haiku-4-5-20251001",
+    response = create_message(
+        client, "flashcards",
         max_tokens=8096,
         messages=[{"role": "user", "content": prompt}],
     )

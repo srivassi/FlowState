@@ -59,7 +59,7 @@ class TutorEfficiencyTests(unittest.TestCase):
         with patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'test-key', 'AI_PROMPT_CACHING': 'false'}), patch(
             'app.api.tutor.anthropic.Anthropic', return_value=client
         ):
-            result = gauntlet_chat(self.request())
+            result = gauntlet_chat(self.request(user_message="It contains DNA.", current_topic_index=1))
         self.assertNotIn('cache_control', client.messages.create.call_args.kwargs['system'][0])
         self.assertEqual(result['reply'], 'Good reasoning.')
         self.assertEqual(result['action'], 'finish')

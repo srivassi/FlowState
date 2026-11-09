@@ -102,7 +102,7 @@ study-planner-agent/
 
 ## AI cost controls
 
-Claude requests now use cost-aware model routing, with economy mode by default. Goblet of Fire uses Haiku for routine turns, Sonnet for deeper/reasoning-heavy turns, and a reusable cached notes prefix. See [routing modes, token logs and rollout](docs/model-routing.md) for optional backend settings and caching limitations.
+Claude requests now use cost-aware model routing, with economy mode by default. Goblet of Fire uses Haiku for routine turns, Sonnet for deeper/reasoning-heavy turns, a maximum-two-call validated cascade, and a reusable cached notes prefix. Opus escalation requires explicit backend opt-in. See [routing modes, token logs and rollout](docs/model-routing.md) for optional backend settings and caching limitations.
 
 ## Running Locally
 

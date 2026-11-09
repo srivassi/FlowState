@@ -3,13 +3,14 @@
 import logging
 import os
 from numbers import Number
-from typing import Any
+from typing import Any, Callable
 
 
 logger = logging.getLogger(__name__)
 
 FAST_MODEL_DEFAULT = "claude-haiku-4-5-20251001"
 REASONING_MODEL_DEFAULT = "claude-sonnet-4-6"
+PREMIUM_MODEL_DEFAULT = "claude-opus-4-6"
 ROUTING_MODES = frozenset({"economy", "balanced", "quality"})
 
 TASKS = frozenset(
@@ -38,6 +39,16 @@ def _model_env(name: str, default: str) -> str:
     if not value.strip():
         raise ValueError(f"{name} must not be empty")
     return value
+
+
+def _boolean_env(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized not in {"true", "false"}:
+        raise ValueError(f"{name} must be 'true' or 'false'")
+    return normalized == "true"
 
 
 def select_model(task: str, complex: bool = False) -> str:
@@ -100,3 +111,46 @@ def create_message(client: Any, task: str, *, complex: bool = False, **kwargs: A
     message = client.messages.create(**request)
     _log_usage(task, model, message)
     return message
+
+
+class QualityGateError(ValueError):
+    """Raised when no attempted model response passes local validation."""
+
+
+def create_validated_message(
+    client: Any,
+    task: str,
+    *,
+    validator: Callable[[Any], bool],
+    complex: bool = False,
+    **kwargs: Any,
+) -> Any:
+    """Try at most two configured models until a response passes validation."""
+    primary = select_model(task, complex=complex)
+    cascade_enabled = _boolean_env("AI_CASCADE_ENABLED", True)
+    allow_opus = _boolean_env("AI_ALLOW_OPUS_ESCALATION", False)
+    reasoning = _model_env("AI_REASONING_MODEL", REASONING_MODEL_DEFAULT)
+
+    candidates = [primary]
+    if cascade_enabled:
+        if primary != reasoning:
+            candidates.append(reasoning)
+        elif allow_opus:
+            candidates.append(_model_env("AI_PREMIUM_MODEL", PREMIUM_MODEL_DEFAULT))
+    candidates = list(dict.fromkeys(candidates))[:2]
+
+    for index, model in enumerate(candidates):
+        if index:
+            logger.info(
+                "Model escalation model=%s reason=quality_gate_rejected",
+                model,
+                extra={"model": model, "reason": "quality_gate_rejected"},
+            )
+        request = dict(kwargs)
+        request["model"] = model
+        response = client.messages.create(**request)
+        _log_usage(task, model, response)
+        if validator(response):
+            return response
+
+    raise QualityGateError("No model response passed the quality gate.")

@@ -9,7 +9,7 @@ import io
 import json
 import re
 from app.core.supabase import get_supabase_client
-from app.core.model_router import create_message
+from app.core.model_router import QualityGateError, create_message, create_validated_message
 
 try:
     import pypdf
@@ -306,6 +306,42 @@ def _needs_reasoning(user_message: str, topic: dict) -> bool:
     ))
 
 
+def _checked_tutor_reply(response, body: ChatRequest):
+    if getattr(response, "stop_reason", None) in {"max_tokens", "refusal", "tool_use"}:
+        raise ValueError("Incomplete tutor response")
+    blocks = getattr(response, "content", [])
+    if not blocks or not isinstance(getattr(blocks[0], "text", None), str):
+        raise ValueError("Missing tutor text")
+    raw = blocks[0].text.strip()
+    if not raw:
+        raise ValueError("Empty tutor response")
+    action_match = re.search(r'\{\s*"action"', raw)
+    if not action_match:
+        return raw, None, None
+    explanation = raw[:action_match.start()].strip()
+    directive = json.loads(raw[action_match.start():])
+    action = directive.get("action")
+    stars = directive.get("stars")
+    if (
+        not explanation
+        or action not in {"next_topic", "finish"}
+        or type(stars) is not int
+        or not 1 <= stars <= 3
+        or body.user_message == "__start__"
+        or (action == "finish") != (body.current_topic_index == len(body.topics) - 1)
+    ):
+        raise ValueError("Invalid tutor progression")
+    return explanation, action, stars
+
+
+def _passes_tutor_gate(response, body: ChatRequest) -> bool:
+    try:
+        _checked_tutor_reply(response, body)
+        return True
+    except (ValueError, TypeError, AttributeError):
+        return False
+
+
 @router.post("/chat")
 def gauntlet_chat(body: ChatRequest):
     api_key = os.getenv("ANTHROPIC_API_KEY")
@@ -351,7 +387,9 @@ If this is the last topic and they've finished it, use:
 
 Otherwise respond normally with no JSON.
 
-IMPORTANT: Only include the JSON line when genuinely moving on. Never include it mid-discussion."""
+IMPORTANT: Only include the JSON line when genuinely moving on. Never include it mid-discussion.
+Never award stars on the initial __start__ turn before the student has answered. Use finish only on the last topic, and next_topic only on earlier topics.
+If you cannot give a reliable response grounded in the notes because the reasoning exceeds your capability, output exactly {{"action": "escalate"}} instead of guessing. Do not use this for an incorrect student answer: use a bridging question instead. This is an internal routing signal, not a message to the student."""
 
     user_msg = body.user_message
     if user_msg == '__go_deeper__':
@@ -371,25 +409,21 @@ IMPORTANT: Only include the JSON line when genuinely moving on. Never include it
         "text": f"CURRENT TOPIC ({body.current_topic_index + 1} of {len(body.topics)}):\n{json.dumps(topic, indent=2)}",
     }]
 
-    response = create_message(
-        client, "tutor_chat", complex=_needs_reasoning(body.user_message, topic),
-        max_tokens=1024,
-        system=system_blocks,
-        messages=messages,
-    )
+    try:
+        response = create_validated_message(
+            client, "tutor_chat", complex=_needs_reasoning(body.user_message, topic),
+            validator=lambda candidate: _passes_tutor_gate(candidate, body),
+            max_tokens=1024,
+            system=system_blocks,
+            messages=messages,
+        )
+    except QualityGateError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="The tutor could not produce a valid response within the model-attempt limit. Your progress has not advanced.",
+        ) from exc
 
-    raw_reply = response.content[0].text
-
-    # Parse out any action directive
-    action = None
-    stars = None
-    clean_reply = raw_reply
-
-    action_match = re.search(r'\{"action":\s*"(next_topic|finish)",\s*"stars":\s*(\d)\}', raw_reply)
-    if action_match:
-        action = action_match.group(1)
-        stars = int(action_match.group(2))
-        clean_reply = raw_reply[:action_match.start()].strip()
+    clean_reply, action, stars = _checked_tutor_reply(response, body)
 
     updated_messages = [
         *body.messages,

@@ -6,6 +6,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 import anthropic as _anthropic
 from fastapi import APIRouter, HTTPException
+from app.core.model_router import create_message
 from app.core.supabase import get_supabase_client
 from app.agent.scheduler import (
     generate_schedule, reschedule_remaining, _parse_date,
@@ -555,10 +556,10 @@ def reschedule_preview(body: FullRescheduleRequest):
         return {"summary": "No remaining tasks to reschedule.", "directives": {}}
 
     try:
-        client = _anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+        client = _anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"), max_retries=0)
         prompt = _build_claude_prompt(ctx, body.feedback or "", body.interleave_courses)
-        msg = client.messages.create(
-            model="claude-opus-4-7",
+        msg = create_message(
+            client, "schedule",
             max_tokens=8000,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -606,10 +607,10 @@ def full_reschedule(body: FullRescheduleRequest):
     if not directives:
         # No pre-computed directives — run Claude now
         try:
-            client = _anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+            client = _anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"), max_retries=0)
             prompt = _build_claude_prompt(ctx, body.feedback or "", body.interleave_courses)
-            msg = client.messages.create(
-                model="claude-opus-4-7",
+            msg = create_message(
+                client, "schedule",
                 max_tokens=8000,
                 messages=[{"role": "user", "content": prompt}],
             )

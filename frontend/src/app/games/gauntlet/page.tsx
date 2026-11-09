@@ -82,6 +82,7 @@ export default function GauntletPage() {
   const [roomId, setRoomId]           = useState<string | null>(null)
   const [sessionSaved, setSessionSaved] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const startedRef = useRef(false)
   const currentTS = topicStates[currentIdx]
 
   useEffect(() => {
@@ -107,6 +108,8 @@ export default function GauntletPage() {
   }, [phase, sessionSaved, roomId, topicStates])
 
   useEffect(() => {
+    if (startedRef.current) return
+    startedRef.current = true
     const raw = sessionStorage.getItem('gauntletPdf')
     if (!raw) { router.replace('/games'); return }
     const { pdfUrl, pdfName: name, roomId: rid } = JSON.parse(raw)
@@ -278,11 +281,15 @@ const handleContinue = () => {
               setCurrentIdx(0); setPhase('loading'); setLoadingMsg('Restarting…')
               const raw = sessionStorage.getItem('gauntletPdf')
               if (!raw) return
-              const { pdfUrl } = JSON.parse(raw)
-              api.gauntletStart(pdfUrl).then(({ topics, pdf_text }: any) => {
+              const { pdfUrl, roomId: cachedRoomId } = JSON.parse(raw)
+              setSessionSaved(false)
+              api.gauntletStart(pdfUrl, cachedRoomId).then(({ topics, pdf_text }: any) => {
                 setPdfText(pdf_text)
                 const states = topics.map((t: Topic) => ({ topic: t, messages: [], stars: null }))
                 setTopicStates(states); sendTurn('', states, 0, pdf_text, topics)
+              }).catch((error: Error) => {
+                alert(error.message || 'Failed to restart Goblet of Fire.')
+                router.replace('/games')
               })
             }}
               className="rounded-lg px-5 py-2.5 text-sm font-medium transition hover:bg-[#EFEFED]"

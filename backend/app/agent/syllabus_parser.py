@@ -3,12 +3,13 @@ import json
 import re
 from datetime import datetime
 from typing import List
+from app.core.model_router import create_message
 from .schemas import Task
 
 
 class SyllabusParser:
     def __init__(self, api_key: str):
-        self.client = anthropic.Anthropic(api_key=api_key)
+        self.client = anthropic.Anthropic(api_key=api_key, max_retries=0)
 
     def parse_to_tasks(self, syllabus: str, preferences, assessment_info) -> List[Task]:
         urgency_context = ""
@@ -46,8 +47,8 @@ Return ONLY a valid JSON array with no markdown, no explanation, nothing else:
 task_type options: study, practice, review, assessment
 priority options: high, medium, low"""
 
-        message = self.client.messages.create(
-            model="claude-opus-4-6",
+        message = create_message(
+            self.client, "syllabus",
             max_tokens=16000,
             messages=[{"role": "user", "content": prompt}]
         )

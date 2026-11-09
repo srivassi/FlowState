@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query
+from app.core.model_router import create_message
 from app.core.supabase import get_supabase_client
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Literal
@@ -85,7 +86,7 @@ def _call_claude_vision(images_b64: list[str], prompt: str, max_tokens: int = 81
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not set")
-    client = anthropic.Anthropic(api_key=api_key)
+    client = anthropic.Anthropic(api_key=api_key, max_retries=0)
 
     content: list = []
     for i, b64 in enumerate(images_b64[:30]):  # cap at 30 pages
@@ -96,8 +97,8 @@ def _call_claude_vision(images_b64: list[str], prompt: str, max_tokens: int = 81
         })
     content.append({"type": "text", "text": prompt})
 
-    msg = client.messages.create(
-        model="claude-sonnet-4-6",
+    msg = create_message(
+        client, "question_extract",
         max_tokens=max_tokens,
         messages=[{"role": "user", "content": content}],
     )
@@ -166,13 +167,13 @@ def _build_question_rows(questions: list, bank_id: str, source_label: str | None
     ]
 
 
-def _call_claude(prompt: str, max_tokens: int = 8000) -> str:
+def _call_claude(prompt: str, max_tokens: int = 8000, task: str = "question_generate") -> str:
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not set")
-    client = anthropic.Anthropic(api_key=api_key)
-    msg = client.messages.create(
-        model="claude-sonnet-4-6",
+    client = anthropic.Anthropic(api_key=api_key, max_retries=0)
+    msg = create_message(
+        client, task,
         max_tokens=max_tokens,
         messages=[{"role": "user", "content": prompt}],
     )
@@ -222,7 +223,7 @@ def _run_extraction(content: bytes, source_label: str) -> tuple[list, str]:
     pdf_text = _extract_pdf_text(content)
     if not pdf_text.strip():
         raise HTTPException(status_code=400, detail="No text could be extracted from the PDF")
-    raw = _call_claude(_EXTRACT_PROMPT + f'\n\nSource: "{source_label}"\n\nExam paper:\n{pdf_text[:60000]}', max_tokens=8192)
+    raw = _call_claude(_EXTRACT_PROMPT + f'\n\nSource: "{source_label}"\n\nExam paper:\n{pdf_text[:60000]}', max_tokens=8192, task="question_extract")
     return _parse_questions(raw), raw
 
 
@@ -601,7 +602,7 @@ Respond with a JSON object:
   "what_to_improve": "One or two specific things to add or strengthen — frame as guidance, not criticism"
 }}"""
 
-    raw = _call_claude(prompt, max_tokens=1024)
+    raw = _call_claude(prompt, max_tokens=1024, task="question_grade")
     cleaned = re.sub(r'```(?:json)?\s*|\s*```', '', raw).strip()
     try:
         result = json.loads(cleaned)

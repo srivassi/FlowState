@@ -398,11 +398,15 @@ const handleContinue = () => {
               setCurrentIdx(0); setPhase('loading'); setLoadingMsg('Restarting…')
               const raw = sessionStorage.getItem('gauntletPdf')
               if (!raw) return
-              const { pdfUrl } = JSON.parse(raw)
-              api.gauntletStart(pdfUrl).then(({ topics, pdf_text }: any) => {
+              const { pdfUrl, roomId: cachedRoomId } = JSON.parse(raw)
+              setSessionSaved(false)
+              api.gauntletStart(pdfUrl, cachedRoomId).then(({ topics, pdf_text }: any) => {
                 setPdfText(pdf_text)
                 const states = topics.map((t: Topic) => ({ topic: t, messages: [], stars: null }))
                 setTopicStates(states); sendTurn('', states, 0, pdf_text, topics)
+              }).catch((error: Error) => {
+                alert(error.message || 'Failed to restart Goblet of Fire.')
+                router.replace('/games')
               })
             }}
               className="rounded-lg px-5 py-2.5 text-sm font-medium transition hover:bg-[#EFEFED]"

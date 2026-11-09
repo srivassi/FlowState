@@ -82,8 +82,14 @@ export const api = {
 
   // ── Gauntlet ──────────────────────────────────────────────────
   gauntletStart: (pdfUrl, roomId) => req('/tutor/start', { method: 'POST', body: JSON.stringify({ pdf_url: pdfUrl, room_id: roomId || null }) }),
+  gauntletSaveExamConfig: (courseId, data) => req(`/tutor/exam-config/${courseId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   gauntletChat: (data) => req('/tutor/chat', { method: 'POST', body: JSON.stringify(data) }),
   gauntletGetRooms: (userId, courseId) => req(`/tutor/rooms?user_id=${userId}${courseId ? `&course_id=${courseId}` : ''}`),
   gauntletUpsertRoom: (data) => req('/tutor/rooms', { method: 'POST', body: JSON.stringify(data) }),
+  gauntletGetProgress: (roomId, userId) => req(`/tutor/rooms/${roomId}/progress?user_id=${encodeURIComponent(userId)}`),
+  gauntletSaveProgress: (roomId, data) => {
+    const body = JSON.stringify(data)
+    return req(`/tutor/rooms/${roomId}/progress`, { method: 'PUT', body, keepalive: new TextEncoder().encode(body).length < 60000 })
+  },
   gauntletSaveSession: (data) => req('/tutor/sessions', { method: 'POST', body: JSON.stringify(data) }),
 }

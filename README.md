@@ -54,6 +54,7 @@ Built by Siddhi and Heza.
 
 ### Games
 - **Goblet of Fire** — Socratic Q&A tutor powered by Claude. Upload a PDF, get broken into topics, earn stars per topic through back-and-forth discussion
+- **Module exam setup** — In Games → Goblet of Fire, select a module and save its question types (MCQ, short answer, essay, problem solving, oral), exam duration, reference-material rules, and marking guidance. Gauntlet uses these for questions and feedback across that module’s PDFs; reset to defaults for Socratic discussion. Duration guides pacing, not a countdown.
 - **Jeopardy** — Flashcard game-show mode; pick a set and race through questions
 
 ### Settings
@@ -99,6 +100,14 @@ study-planner-agent/
 ```
 
 ---
+
+## Database migrations
+
+Before deploying module exam context, apply `backend/migrations/20261103_gauntlet_exam_config.sql` to the target Supabase database, then deploy the backend and frontend. See [migration and rollback instructions](backend/migrations/README.md).
+
+## GoF automatic progress
+
+Rooms automatically checkpoint conversations, topic position and stars and resume on reopening without another initial AI turn. Apply `backend/migrations/20261109_gauntlet_progress.sql` before deploying autosave; the earlier exam-context SQL alone does not add this column. See [migration and rollback instructions](backend/migrations/README.md).
 
 ## Running Locally
 

@@ -9,6 +9,7 @@ import io
 import json
 import re
 from app.core.supabase import get_supabase_client
+from app.core.model_router import create_message
 
 try:
     import pypdf
@@ -81,7 +82,7 @@ def _pdf_to_images_b64(content: bytes, dpi: int = 150) -> list:
 
 def _vision_transcribe_pages(images_b64: list, api_key: str) -> str:
     """Send pages to Claude Haiku in batches of 5 and return transcribed text."""
-    client = anthropic.Anthropic(api_key=api_key)
+    client = anthropic.Anthropic(api_key=api_key, max_retries=0)
     BATCH = 5
     parts = []
     for i in range(0, len(images_b64), BATCH):
@@ -100,8 +101,8 @@ def _vision_transcribe_pages(images_b64: list, api_key: str) -> str:
             )
         })
         try:
-            msg = client.messages.create(
-                model="claude-haiku-4-5-20251001",
+            msg = create_message(
+                client, "ocr",
                 max_tokens=4096,
                 messages=[{"role": "user", "content": content}],
             )
@@ -240,7 +241,7 @@ def start_gauntlet(body: StartRequest):
     if not _has_enough_text(pdf_text):
         raise HTTPException(status_code=400, detail="Not enough readable text in this PDF. It may be a scanned or image-based document.")
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = anthropic.Anthropic(api_key=api_key, max_retries=0)
 
     prompt = f"""You are analysing a lecture PDF to create a Gauntlet study session.
 
@@ -264,8 +265,8 @@ Return ONLY a valid JSON object with this exact structure, no other text:
 Aim for 4-8 topics. If the PDF is short, fewer is fine."""
 
     try:
-        msg = client.messages.create(
-            model="claude-sonnet-4-6",
+        msg = create_message(
+            client, "tutor_topics",
             max_tokens=2000,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -294,16 +295,28 @@ Aim for 4-8 topics. If the PDF is short, fewer is fine."""
 
 # ─── Chat: Socratic tutoring turn ────────────────────────────
 
+def _needs_reasoning(user_message: str, topic: dict) -> bool:
+    if user_message == "__go_deeper__" or len(user_message) >= 1200:
+        return True
+    context = f"{topic.get('title', '')} {topic.get('summary', '')} {user_message}"
+    return bool(re.search(
+        r"\b(proof|prove|derive|derivation|integral|differential|algorithm|complexity|"
+        r"debug|counterexample|critique|evaluate|essay)\b|[∫∑√]",
+        context, re.IGNORECASE,
+    ))
+
+
 @router.post("/chat")
 def gauntlet_chat(body: ChatRequest):
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not set")
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = anthropic.Anthropic(api_key=api_key, max_retries=0)
 
-    topic = body.topics[body.current_topic_index] if body.current_topic_index < len(body.topics) else None
-    is_last_topic = body.current_topic_index >= len(body.topics) - 1
+    if not 0 <= body.current_topic_index < len(body.topics):
+        raise HTTPException(status_code=400, detail="Choose a valid topic")
+    topic = body.topics[body.current_topic_index]
 
     system = f"""You are a Socratic tutor running a "Gauntlet" study session. Your role is to guide the student to understanding through conversation — never just quiz them.
 
@@ -312,9 +325,6 @@ FULL PDF CONTENT:
 
 ALL TOPICS IN THIS SESSION:
 {json.dumps(body.topics, indent=2)}
-
-CURRENT TOPIC ({body.current_topic_index + 1} of {len(body.topics)}):
-{json.dumps(topic, indent=2) if topic else "Session complete"}
 
 HOW TO TEACH:
 - If this is the first message on a topic, give a 1-2 sentence framing of why this topic matters, then ask ONE open question to get them thinking. Do NOT list facts or lecture.
@@ -353,11 +363,18 @@ IMPORTANT: Only include the JSON line when genuinely moving on. Never include it
         )
 
     messages = [*body.messages, {"role": "user", "content": user_msg}]
+    stable_block = {"type": "text", "text": system}
+    if os.getenv("AI_PROMPT_CACHING", "true").lower() == "true":
+        stable_block["cache_control"] = {"type": "ephemeral"}
+    system_blocks = [stable_block, {
+        "type": "text",
+        "text": f"CURRENT TOPIC ({body.current_topic_index + 1} of {len(body.topics)}):\n{json.dumps(topic, indent=2)}",
+    }]
 
-    response = client.messages.create(
-        model="claude-sonnet-4-6",
+    response = create_message(
+        client, "tutor_chat", complex=_needs_reasoning(body.user_message, topic),
         max_tokens=1024,
-        system=system,
+        system=system_blocks,
         messages=messages,
     )
 

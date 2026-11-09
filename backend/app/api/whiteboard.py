@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from app.core.model_router import create_message
 from app.core.supabase import get_supabase_client
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -245,7 +246,7 @@ def chat_on_note(body: ChatMessage):
     if not api_key:
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not set")
 
-    client = anthropic.Anthropic(api_key=api_key)
+    client = anthropic.Anthropic(api_key=api_key, max_retries=0)
 
     system_prompt = (
         "You are a study assistant helping a student understand their course material. "
@@ -289,8 +290,8 @@ def chat_on_note(body: ChatMessage):
 
     messages = [*body.prior_messages, {"role": "user", "content": body.message}]
 
-    response = client.messages.create(
-        model="claude-opus-4-6",
+    response = create_message(
+        client, "whiteboard",
         max_tokens=1024,
         system=system_prompt,
         messages=messages,

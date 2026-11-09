@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field, conint, constr
+from pydantic import BaseModel, ConfigDict, Field, conint, constr, model_validator
 from typing import List, Optional, Dict, Literal
 from datetime import datetime, timezone
 from collections import defaultdict
@@ -80,6 +80,65 @@ class SessionSave(BaseModel):
     total_stars: int
     max_stars: int
     topic_results: List[Dict]  # [{title, stars}]
+
+
+class ProgressTopic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: constr(min_length=1, max_length=100)
+    title: constr(min_length=1, max_length=500)
+    summary: constr(max_length=5000)
+    key_points: Optional[List[constr(max_length=20000)]] = Field(default=None, max_length=100)
+
+
+class ProgressMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["user", "assistant"]
+    content: constr(min_length=1, max_length=20000)
+
+
+class ProgressTopicState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    topic: ProgressTopic
+    messages: List[ProgressMessage] = Field(max_length=200)
+    stars: Optional[conint(strict=True, ge=0, le=3)] = None
+
+
+class PendingNext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    next_idx: conint(strict=True, ge=-1, le=99)
+    stars: conint(strict=True, ge=0, le=3)
+
+
+class ProgressSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version: Literal[1] = 1
+    session_id: constr(min_length=1, max_length=100)
+    phase: Literal["active", "finished"]
+    current_topic_index: conint(strict=True, ge=0)
+    topic_states: List[ProgressTopicState] = Field(min_length=1, max_length=100)
+    pending_next: Optional[PendingNext] = None
+
+    @model_validator(mode="after")
+    def validate_progress_bounds(self):
+        if self.current_topic_index >= len(self.topic_states):
+            raise ValueError("current_topic_index must reference a topic state")
+        if self.pending_next is not None and self.pending_next.next_idx >= len(self.topic_states):
+            raise ValueError("pending_next.next_idx must reference a topic state or be -1")
+        if len(self.model_dump_json().encode("utf-8")) > 1_000_000:
+            raise ValueError("progress snapshot must be at most 1 MB")
+        return self
+
+
+class ProgressUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: constr(min_length=1, max_length=200)
+    progress: ProgressSnapshot
 
 
 def _pdf_to_images_b64(content: bytes, dpi: int = 150) -> list:
@@ -504,10 +563,44 @@ IMPORTANT: Only include the JSON line when genuinely moving on. Never include it
 
 # ─── Rooms ───────────────────────────────────────────────────
 
+@router.get("/rooms/{room_id}/progress")
+def get_room_progress(room_id: str, user_id: str = Query(...)):
+    result = (
+        get_supabase_client()
+        .table("gauntlet_rooms")
+        .select("progress")
+        .eq("id", room_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Room not found")
+    return {"progress": result.data[0].get("progress")}
+
+
+@router.put("/rooms/{room_id}/progress")
+def update_room_progress(room_id: str, body: ProgressUpdate):
+    now = datetime.now(timezone.utc).isoformat()
+    result = (
+        get_supabase_client()
+        .table("gauntlet_rooms")
+        .update({"progress": body.progress.model_dump(mode="json"), "last_played_at": now})
+        .eq("id", room_id)
+        .eq("user_id", body.user_id)
+        .select("id")
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Room not found")
+    return {"progress": body.progress.model_dump(mode="json")}
+
+
 @router.get("/rooms")
 def get_rooms(user_id: str = Query(...), course_id: Optional[str] = Query(None)):
     supabase = get_supabase_client()
-    q = supabase.table("gauntlet_rooms").select("*").eq("user_id", user_id)
+    q = supabase.table("gauntlet_rooms").select(
+        "id, user_id, course_id, pdf_url, pdf_name, last_played_at"
+    ).eq("user_id", user_id)
     if course_id:
         q = q.eq("course_id", course_id)
     rooms = q.order("last_played_at", desc=True).execute().data or []

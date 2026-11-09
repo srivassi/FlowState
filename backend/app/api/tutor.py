@@ -30,6 +30,7 @@ except ImportError:
     HAS_REQUESTS = False
 
 router = APIRouter(prefix="/tutor")
+MAX_GOF_TEXT_CHARS = 100000
 
 
 class StartRequest(BaseModel):
@@ -199,23 +200,24 @@ def _fetch_pdf_text(pdf_url: str) -> str:
     except Exception:
         return ""
 
-    # Attempt 1: pypdf text extraction
-    if HAS_PYPDF:
+    # PyMuPDF handles embedded-font character maps that pypdf can misread.
+    if HAS_FITZ:
         try:
-            reader = pypdf.PdfReader(io.BytesIO(content))
-            pages = [reader.pages[i].extract_text() or "" for i in range(len(reader.pages))]
+            doc = _fitz.open(stream=content, filetype="pdf")
+            try:
+                pages = [doc[i].get_text() or "" for i in range(len(doc))]
+            finally:
+                doc.close()
             text = "\n\n".join(f"[Page {i+1}]\n{t}" for i, t in enumerate(pages))
             if _has_enough_text(text):
                 return text
         except Exception:
             pass
 
-    # Attempt 2: PyMuPDF text extraction (handles more encoding variants)
-    if HAS_FITZ:
+    if HAS_PYPDF:
         try:
-            doc = _fitz.open(stream=content, filetype="pdf")
-            pages = [doc[i].get_text() or "" for i in range(len(doc))]
-            doc.close()
+            reader = pypdf.PdfReader(io.BytesIO(content))
+            pages = [reader.pages[i].extract_text() or "" for i in range(len(reader.pages))]
             text = "\n\n".join(f"[Page {i+1}]\n{t}" for i, t in enumerate(pages))
             if _has_enough_text(text):
                 return text
@@ -244,41 +246,38 @@ def _has_enough_text(pdf_text: str, min_chars: int = 300) -> bool:
 
 
 def _extract_json(raw: str) -> dict:
-    cleaned = re.sub(r'```(?:json)?\s*|\s*```', '', raw).strip()
-
-    def _try_parse(s: str):
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r"[\[{]", raw):
         try:
-            parsed = json.loads(s)
-            if isinstance(parsed, dict):
-                return parsed
-            if isinstance(parsed, list):
-                return {"topics": parsed}
-        except Exception:
-            pass
-        return None
-
-    # Direct parse
-    result = _try_parse(cleaned)
-    if result:
-        return result
-
-    # Outermost { ... }
-    start = cleaned.find('{')
-    end = cleaned.rfind('}')
-    if start != -1 and end > start:
-        result = _try_parse(cleaned[start:end + 1])
-        if result:
-            return result
-
-    # Outermost [ ... ]
-    start = cleaned.find('[')
-    end = cleaned.rfind(']')
-    if start != -1 and end > start:
-        result = _try_parse(cleaned[start:end + 1])
-        if result:
-            return result
-
+            parsed, _ = decoder.raw_decode(raw[match.start():])
+        except ValueError:
+            continue
+        if isinstance(parsed, dict) and "topics" in parsed:
+            return parsed
+        if isinstance(parsed, list) and parsed and all(isinstance(topic, dict) for topic in parsed):
+            return {"topics": parsed}
     return {}
+
+
+def _normalise_topics(raw: str) -> list:
+    topics = _extract_json(raw).get("topics")
+    if not isinstance(topics, list) or not 1 <= len(topics) <= 100:
+        return []
+    normalised = []
+    for index, topic in enumerate(topics):
+        if not isinstance(topic, dict):
+            return []
+        title, summary = topic.get("title"), topic.get("summary")
+        points = topic.get("key_points", [])
+        if (
+            not isinstance(title, str) or not title.strip() or len(title) > 500
+            or not isinstance(summary, str) or not summary.strip() or len(summary) > 5000
+            or not isinstance(points, list) or len(points) > 100
+            or any(not isinstance(point, str) or len(point) > 20000 for point in points)
+        ):
+            return []
+        normalised.append({"id": str(index + 1), "title": title.strip(), "summary": summary.strip(), "key_points": points})
+    return normalised
 
 
 # ─── Start: extract topics from PDF ──────────────────────────
@@ -317,12 +316,15 @@ def start_gauntlet(body: StartRequest):
     if not _has_enough_text(pdf_text):
         raise HTTPException(status_code=400, detail="Not enough readable text in this PDF. It may be a scanned or image-based document.")
 
+    if len(pdf_text) > MAX_GOF_TEXT_CHARS:
+        raise HTTPException(status_code=413, detail="This PDF exceeds the supported study-text length. Split it into chapters so no material is silently omitted.")
+
     client = anthropic.Anthropic(api_key=api_key, max_retries=0)
 
     prompt = f"""You are analysing a lecture PDF to create a Gauntlet study session.
 
-PDF CONTENT (may be truncated):
-{pdf_text[:30000]}
+PDF CONTENT:
+{pdf_text}
 
 Extract the key topics from this material. Each topic should be a coherent concept or section that can be taught and tested in 2-4 exchanges.
 
@@ -338,35 +340,39 @@ Return ONLY a valid JSON object with this exact structure, no other text:
   ]
 }}
 
-Aim for 4-8 topics. If the PDF is short, fewer is fine."""
+Aim for 4-8 topics. If the PDF is short, fewer is fine. Keep each summary under 50 words and include at most 3 short key points per topic. Always return the JSON structure above, with no commentary."""
 
     try:
         msg = create_message(
             client, "tutor_topics",
-            max_tokens=2000,
+            max_tokens=4000,
             messages=[{"role": "user", "content": prompt}],
         )
-        result = _extract_json(msg.content[0].text)
-        topics = result.get("topics", [])
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"AI topic extraction failed: {str(e)}")
+        if getattr(msg, "stop_reason", None) == "max_tokens":
+            raise HTTPException(status_code=502, detail="Topic extraction exceeded its response limit. Try a shorter PDF or selected chapters.")
+        text = "".join(block.text for block in msg.content if isinstance(getattr(block, "text", None), str))
+        topics = _normalise_topics(text)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=502, detail="The AI provider could not complete topic extraction. Check your API account or try again later.")
 
     if not topics:
-        raise HTTPException(status_code=500, detail="Could not extract topics from this PDF. The content may be too short or unclear.")
+        raise HTTPException(status_code=502, detail="The AI returned no usable topic list. Try a shorter PDF or selected chapters; no topics were saved.")
 
-    truncated_text = pdf_text[:40000]
+    study_text = pdf_text
 
     # Cache topics and pdf_text in the room for future opens
     if body.room_id:
         try:
             supabase.table("gauntlet_rooms").update({
                 "topics": topics,
-                "pdf_text": truncated_text,
+                "pdf_text": study_text,
             }).eq("id", body.room_id).execute()
         except Exception:
             pass
 
-    return {"topics": topics, "pdf_text": truncated_text}
+    return {"topics": topics, "pdf_text": study_text}
 
 
 # ─── Chat: Socratic tutoring turn ────────────────────────────
@@ -528,7 +534,7 @@ def gauntlet_chat(body: ChatRequest):
     system = f"""You are a Socratic tutor running a "Gauntlet" study session. Your role is to guide the student to understanding through conversation — never just quiz them.
 
 FULL PDF CONTENT:
-{body.pdf_text[:30000]}
+{body.pdf_text[:MAX_GOF_TEXT_CHARS]}
 
 ALL TOPICS IN THIS SESSION:
 {json.dumps(body.topics, indent=2)}

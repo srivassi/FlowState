@@ -7,7 +7,13 @@ async function req(path, options = {}) {
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(err.detail || 'Request failed')
+    const detail = err.detail
+    const message = typeof detail === 'string' ? detail
+      : Array.isArray(detail) ? detail.map(item => {
+        const field = Array.isArray(item.loc) ? item.loc.join('.') : 'request'
+        return `${field}: ${item.msg || 'Invalid value'}`
+      }).join('; ') : ''
+    throw new Error(message || `Request failed (HTTP ${res.status})`)
   }
   return res.json()
 }

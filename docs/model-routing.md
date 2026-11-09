@@ -38,7 +38,7 @@ These are structural checks and a fallible model-reported uncertainty signal, **
 
 - Reopening a saved room reuses its existing PDF text and extracted topics. “Play again” now passes the room ID too, avoiding another extraction for cached rooms.
 - The initial React effect is guarded against duplicate development-mode starts.
-- The full existing notes context (up to the existing 30,000-character limit), topic map and tutor protocol form a stable system prefix. The current topic is a later block, so changing topics does not invalidate that prefix. Existing conversation history remains intact; no paid summarisation call or lossy topic retrieval is added.
+- The full existing notes context (up to the 100,000-character supported-text limit on main), topic map and tutor protocol form a stable system prefix. The current topic is a later block, so changing topics does not invalidate that prefix. Existing conversation history remains intact; no paid summarisation call or lossy topic retrieval is added.
 - `AI_PROMPT_CACHING=true` (default) marks the stable prefix with Claude's five-minute ephemeral cache control. Set it to `false` to opt out.
 
 Caching is provider-managed, model-specific, and depends on an identical prefix, sufficient prompt length and reuse within the TTL. Sonnet 4.6 requires at least 1,024 cacheable tokens; Haiku 4.5 requires 4,096. Below the minimum the breakpoint is ignored. Cache writes have a premium (1.25× ordinary input pricing); hits cost 0.1× for these models. A cold, expired, changed or different-model request may not save anything. There is **no guaranteed percentage saving** and no claim of measured live savings.

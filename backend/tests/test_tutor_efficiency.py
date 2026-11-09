@@ -46,7 +46,7 @@ class TutorEfficiencyTests(unittest.TestCase):
         first, second = [call.kwargs for call in client.messages.create.call_args_list]
         self.assertEqual(first['system'][0], second['system'][0])
         self.assertEqual(first['system'][0]['cache_control'], {'type': 'ephemeral'})
-        self.assertIn(self.request().pdf_text[:30000], first['system'][0]['text'])
+        self.assertIn(self.request().pdf_text, first['system'][0]['text'])
         self.assertNotIn('CURRENT TOPIC', first['system'][0]['text'])
         self.assertIn('CURRENT TOPIC (2 of 2)', second['system'][1]['text'])
         self.assertNotIn('cache_control', second['system'][1])

@@ -143,3 +143,11 @@ NEXT_PUBLIC_SUPABASE_URL=...
 NEXT_PUBLIC_SUPABASE_ANON_KEY=...
 NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
+
+### Generation troubleshooting
+
+Whiteboard auto-flashcards use `POST /flashcards/generate-from-url` with JSON containing `pdf_url`, `user_id`, `course_id`, `title` and optional `instructions`. Only public whiteboard PDFs under the configured `SUPABASE_URL` and the matching user/course storage path are accepted; downloads are capped at 20 MiB and redirects are disabled. Multipart PDF generation remains available at `/flashcards/generate`.
+
+GoF prefers PyMuPDF text extraction when available to avoid embedded-font character-map corruption, with pypdf as fallback. New topic extraction and tutoring retain the full supported PDF text up to 100,000 characters, rather than silently clipping at 30,000; longer sources must be split. Existing cached room text is not automatically re-extracted. Topic extraction accepts JSON objects or arrays, including fenced or explanatory wrappers, and validates topics before caching. Its response cap is 4,000 output tokens (previously 2,000); this is a ceiling, not a fixed charge. Truncated/invalid topic replies produce a specific error without an extra automatic extraction call or cached bad data. Model selection is unchanged.
+
+For a failed request, copy the specific Network request's URL, HTTP status and response `detail`, omitting tokens and signed query strings. A missing `query.user_id` response belongs to a query-based endpoint; `/tutor/start` uses a JSON body with `pdf_url` and optional `room_id`, not a `user_id` query. DNS errors need the failing hostname to distinguish API, storage and external asset failures.

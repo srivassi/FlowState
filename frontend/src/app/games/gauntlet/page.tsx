@@ -142,7 +142,9 @@ export default function GauntletPage() {
     setPhase('active')
     const prior = states[idx].messages
     try {
+      const context = JSON.parse(sessionStorage.getItem('gauntletPdf') || '{}')
       const res = await api.gauntletChat({
+        course_id: context.courseId || undefined, user_id: context.userId || undefined,
         pdf_text: text, topics, current_topic_index: idx,
         messages: prior, user_message: userMsg || '__start__',
       })

@@ -54,6 +54,7 @@ Built by Siddhi and Heza.
 
 ### Games
 - **Goblet of Fire** — Socratic Q&A tutor powered by Claude. Upload a PDF, get broken into topics, earn stars per topic through back-and-forth discussion
+- **Module exam context** — Games → Goblet of Fire → choose a module → “How is this module examined?” saves question types, duration, open/closed-book rules and marking guidance across its PDFs.
 - **Jeopardy** — Flashcard game-show mode; pick a set and race through questions
 
 ### Settings
@@ -99,6 +100,10 @@ study-planner-agent/
 ```
 
 ---
+
+## GoF exam-context migration
+
+Before deploying module exam context, apply `backend/migrations/20261103_gauntlet_exam_config.sql` to the target Supabase database, then deploy the backend and frontend. See [migration and rollback instructions](backend/migrations/README.md).
 
 ## AI cost controls
 

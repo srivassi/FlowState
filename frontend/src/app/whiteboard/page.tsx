@@ -353,7 +353,12 @@ function WhiteboardInner() {
         headers: { 'Content-Type': 'application/pdf' },
       })
       if (!uploadRes.ok) {
-        alert('Upload failed: could not store file (HTTP ' + uploadRes.status + ')')
+        const error = await uploadRes.json().catch(() => null)
+        const detail = error?.message || error?.error
+        const reason = typeof detail === 'string'
+          ? detail.replace(/https?:\/\/\S+/g, '[storage URL]').replace(/token=[^\s&]+/gi, 'token=[redacted]').slice(0, 300)
+          : 'Storage rejected the file'
+        alert(`Upload failed (HTTP ${uploadRes.status}): ${reason}`)
         return
       }
 
@@ -381,6 +386,8 @@ function WhiteboardInner() {
       api.generateFlashcardsFromUrl({ pdf_url, user_id: userId, course_id: selectedCourse, title: setTitle })
         .then(() => setFlashcardGenStatus('done'))
         .catch(() => setFlashcardGenStatus('error'))
+    } catch {
+      alert('Upload failed: could not complete the upload or save the whiteboard. Please check your connection and retry.')
     } finally { setSaving(false) }
   }
 

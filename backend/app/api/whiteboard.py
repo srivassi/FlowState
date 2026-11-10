@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from app.core.supabase import get_supabase_client
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 import anthropic
 import os
@@ -114,23 +114,23 @@ def upload_pdf(
 # ─── Extract sections from an existing PDF URL ───────────────
 
 class UploadUrlRequest(BaseModel):
-    user_id: str
-    course_id: str
-    file_name: str
+    user_id: str = Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9_-]+$")
+    course_id: str = Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9_-]+$")
+    file_name: str = Field(min_length=1, max_length=1000)
 
 
 @router.post("/upload-url")
 def get_upload_url(body: UploadUrlRequest):
     """Return a signed Supabase upload URL so the browser can upload large PDFs directly."""
     supabase = get_supabase_client()
-    path = f"{body.user_id}/{body.course_id}/{body.file_name}"
+    path = f"{body.user_id}/{body.course_id}/{uuid.uuid4().hex}.pdf"
     try:
         signed = supabase.storage.from_("whiteboards").create_signed_upload_url(path)
-        signed_url = signed.get("signedURL") or signed.get("signed_url") or ""
+        signed_url = signed.get("signedURL") or signed.get("signed_url") or signed.get("signedUrl") or ""
         if not signed_url:
-            raise ValueError(f"Unexpected signed URL response: {signed}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Could not create upload URL: {e}")
+            raise ValueError("Storage did not return an upload URL")
+    except Exception:
+        raise HTTPException(status_code=502, detail="Could not create a PDF upload URL. Please try again.")
     pdf_url = supabase.storage.from_("whiteboards").get_public_url(path)
     return {"signed_url": signed_url, "pdf_url": pdf_url, "path": path}
 
